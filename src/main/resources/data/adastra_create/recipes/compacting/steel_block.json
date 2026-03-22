@@ -1,0 +1,16 @@
+{
+    "type": "create:compacting",
+    "ingredients": [
+        {"item": "ad_astra:steel_ingot"},
+        {"item": "ad_astra:steel_ingot"},
+        {"item": "ad_astra:steel_ingot"},
+        {"item": "ad_astra:steel_ingot"},
+        {"item": "ad_astra:steel_ingot"},
+        {"item": "ad_astra:steel_ingot"},
+        {"item": "ad_astra:steel_ingot"},
+        {"item": "ad_astra:steel_ingot"},
+        {"item": "ad_astra:steel_ingot"}
+    ],
+    "results": [{"item": "ad_astra:steel_block", "count": 1}],
+    "processingTime": 200
+}
