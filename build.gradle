@@ -1,18 +1,56 @@
+plugins {
+    id 'net.minecraftforge.gradle' version '[6.0,6.2)'
+}
+
+version = '1.0.0'
+group = 'com.mortylovelly.adastracreate'
+
+base {
+    archivesName = 'adastra-create-1.20.1'
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(17)
+}
+
+minecraft {
+    mappings channel: 'official', version: '1.20.1'
+    runs {
+        client {
+            workingDirectory project.file('run')
+            mods {
+                adastra_create { source sourceSets.main }
+            }
+        }
+        server {
+            workingDirectory project.file('run')
+            mods {
+                adastra_create { source sourceSets.main }
+            }
+        }
+    }
+}
+
 repositories {
     maven { url = 'https://maven.minecraftforge.net' }
-    maven {
-        url = 'https://maven.terrarium.earth/releases'
-    }
-    maven {
-        url = 'https://maven.createmod.net'
-    }
-    maven {
-        url = 'https://cursemaven.com'
-    }
+    maven { url = 'https://cursemaven.com' }
 }
 
 dependencies {
     minecraft 'net.minecraftforge:forge:1.20.1-47.2.0'
     compileOnly fg.deobf('curse.maven:ad-astra-557537:4835912')
     compileOnly fg.deobf('curse.maven:create-328085:5588539')
+}
+
+jar {
+    manifest {
+        attributes([
+            'Specification-Title'   : 'adastra_create',
+            'Specification-Vendor'  : 'mortylovelly',
+            'Specification-Version' : '1',
+            'Implementation-Title'  : project.name,
+            'Implementation-Version': project.jar.archiveVersion,
+            'Implementation-Vendor' : 'mortylovelly',
+        ])
+    }
 }
