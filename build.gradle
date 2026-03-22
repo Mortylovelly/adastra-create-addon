@@ -33,13 +33,14 @@ minecraft {
 
 repositories {
     maven { url = 'https://maven.minecraftforge.net' }
-    maven { url = 'https://cursemaven.com' }
+    maven { url = 'https://maven.createmod.net' }
+    maven { url = 'https://maven.terrarium.earth' }
 }
 
 dependencies {
     minecraft 'net.minecraftforge:forge:1.20.1-47.2.0'
-    compileOnly fg.deobf('curse.maven:ad-astra-557537:6262032')
-    compileOnly fg.deobf('curse.maven:create-328085:4835191')
+    compileOnly fg.deobf('earth.terrarium.adastra:ad_astra-forge-1.20.1:1.15.20')
+    compileOnly fg.deobf('com.simibubi.create:create-1.20.1:0.5.1.f:slim') { transitive = false }
 }
 
 jar {
