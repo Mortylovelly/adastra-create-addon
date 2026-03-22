@@ -1,0 +1,13 @@
+{
+    "type": "create:pressing",
+    "ingredients": [
+        {
+            "item": "ad_astra:steel_ingot"
+        }
+    ],
+    "results": [
+        {
+            "item": "adastra_create:steel_sheet"
+        }
+    ]
+}
