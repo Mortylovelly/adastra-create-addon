@@ -1,5 +1,5 @@
 {
-    "type": "create:blasting",
+    "type": "create:fan_blasting",
     "ingredients": [
         {
             "item": "minecraft:iron_ingot"
