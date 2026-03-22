@@ -1,0 +1,6 @@
+{
+    "type": "create:cutting",
+    "ingredients": [{"item": "ad_astra:steel_ingot"}],
+    "results": [{"item": "ad_astra:steel_rod", "count": 2}],
+    "processingTime": 50
+}
