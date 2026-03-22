@@ -11,5 +11,6 @@ public class AdAstraCreate {
     public AdAstraCreate() {
         IEventBus bus = FMLJavaModLoadingContext.get().getModEventBus();
         ModItems.ITEMS.register(bus);
+        ModItems.TABS.register(bus);
     }
 }
