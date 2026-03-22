@@ -1,0 +1,15 @@
+{
+    "type": "create:fan_blasting",
+    "ingredients": [
+        {
+            "item": "minecraft:iron_ingot"
+        }
+    ],
+    "results": [
+        {
+            "item": "ad_astra:steel_ingot",
+            "count": 1
+        }
+    ],
+    "processingTime": 100
+}
