@@ -38,8 +38,8 @@ repositories {
 
 dependencies {
     minecraft 'net.minecraftforge:forge:1.20.1-47.2.0'
-    compileOnly fg.deobf('curse.maven:ad-astra-557537:4835912')
-    compileOnly fg.deobf('curse.maven:create-328085:5588539')
+    compileOnly fg.deobf('curse.maven:ad-astra-557537:6262032')
+    compileOnly fg.deobf('curse.maven:create-328085:4835191')
 }
 
 jar {
