@@ -1,6 +1,13 @@
 {
     "type": "create:pressing",
-    "ingredients": [{"item": "ad_astra:steel_ingot"}],
-    "results": [{"item": "ad_astra:steel_plate", "count": 1}],
-    "processingTime": 100
+    "ingredients": [
+        {
+            "item": "ad_astra:steel_ingot"
+        }
+    ],
+    "results": [
+        {
+            "item": "ad_astra:steel_plate"
+        }
+    ]
 }
