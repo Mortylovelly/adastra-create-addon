@@ -9,6 +9,9 @@ public class ModItems {
     public static final DeferredRegister<Item> ITEMS =
         DeferredRegister.create(ForgeRegistries.ITEMS, AdAstraCreate.MOD_ID);
 
+    public static final RegistryObject<Item> STEEL_SHEET =
+        ITEMS.register("steel_sheet", () -> new Item(new Item.Properties()));
+
     public static final RegistryObject<Item> SUPERALLOY_PLATE =
         ITEMS.register("superalloy_plate", () -> new Item(new Item.Properties()));
 }
