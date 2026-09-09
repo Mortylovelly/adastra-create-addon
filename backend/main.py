@@ -18,6 +18,10 @@ BRIDGE_PORT = int(os.getenv("MINECRAFT_BRIDGE_PORT", "8765"))
 
 app = FastAPI(title="Minecraft AI Agent Bridge")
 
+# One conversation per client session. The in-game panel supplies its own UUID,
+# so opening/closing the GUI does not destroy the AI conversation.
+SESSION_RESPONSES: dict[str, str] = {}
+
 SYSTEM_PROMPT = """
 You are the AI agent inside a Minecraft 1.21.1 world.
 You have access to Minecraft through explicit tools. Never claim that an action succeeded unless a tool result confirms it.
@@ -25,6 +29,7 @@ Prefer inspecting the world before changing it. Keep changes targeted and explai
 Coordinates in the tools refer to the Minecraft overworld for this first version.
 When a user asks you to build something, reason about the layout and then use place_block repeatedly.
 When a user asks you to destroy something, inspect first and then use break_block.
+When a user asks to give an item, use give_item instead of telling the player to run /give.
 Do not use tools to perform harmful or irreversible actions unless the user explicitly requested them.
 """.strip()
 
@@ -129,6 +134,22 @@ TOOLS = [
     },
     {
         "type": "function",
+        "name": "give_item",
+        "description": "Give an online Minecraft player an item directly into their inventory. Use a valid item ID such as minecraft:diamond_sword.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "player": {"type": "string", "description": "Player name. Leave empty for the first online player."},
+                "item": {"type": "string", "description": "Minecraft item ID, for example minecraft:diamond_sword."},
+                "count": {"type": "integer", "minimum": 1, "maximum": 64},
+            },
+            "required": ["player", "item", "count"],
+            "additionalProperties": False,
+        },
+        "strict": True,
+    },
+    {
+        "type": "function",
         "name": "send_chat",
         "description": "Send a visible [AI] message to all online players.",
         "parameters": {
@@ -144,6 +165,7 @@ TOOLS = [
 
 class ChatRequest(BaseModel):
     message: str
+    session_id: str = "default"
 
 
 def bridge_call(tool: str, args: dict[str, Any]) -> dict[str, Any]:
@@ -183,16 +205,23 @@ def openai_response(payload: dict[str, Any]) -> dict[str, Any]:
     return response.json()
 
 
-def run_agent(message: str) -> str:
+def run_agent(message: str, session_id: str) -> str:
+    previous_response_id = SESSION_RESPONSES.get(session_id)
     payload: dict[str, Any] = {
         "model": OPENAI_MODEL,
         "instructions": SYSTEM_PROMPT,
         "input": message,
         "tools": TOOLS,
     }
+    if previous_response_id:
+        payload["previous_response_id"] = previous_response_id
 
     for _ in range(20):
         response = openai_response(payload)
+        response_id = response.get("id")
+        if response_id:
+            SESSION_RESPONSES[session_id] = response_id
+
         function_calls = [item for item in response.get("output", []) if item.get("type") == "function_call"]
 
         if not function_calls:
@@ -239,9 +268,10 @@ def health() -> dict[str, Any]:
 @app.post("/chat")
 def chat(request: ChatRequest) -> dict[str, str]:
     message = request.message.strip()
+    session_id = request.session_id.strip() or "default"
     if not message:
         raise HTTPException(status_code=400, detail="message cannot be empty")
-    return {"reply": run_agent(message)}
+    return {"reply": run_agent(message, session_id)}
 
 
 @app.get("/")
