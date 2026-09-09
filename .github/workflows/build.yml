@@ -34,7 +34,6 @@ jobs:
           path = Path('src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java')
           text = path.read_text(encoding='utf-8')
 
-          # Gson compatibility used by the current project.
           text = text.replace(
               'DEEPSEEK_CONVERSATION.clear();',
               'while (!DEEPSEEK_CONVERSATION.isEmpty()) DEEPSEEK_CONVERSATION.remove(DEEPSEEK_CONVERSATION.size() - 1);'
@@ -44,19 +43,20 @@ jobs:
               'while (!GROQ_CONVERSATION.isEmpty()) GROQ_CONVERSATION.remove(GROQ_CONVERSATION.size() - 1);'
           )
 
-          # Normalize diagnostic imports.
-          text = re.sub(r'^import java\\.net\\.(InetAddress|InetSocketAddress|Socket);\\s*$', '', text, flags=re.MULTILINE)
-          import_marker = 'import java.net.ConnectException;'
+          # Remove any copies added by earlier diagnostic attempts and add one clean set.
+          text = re.sub(r'^import java\.net\.(InetAddress|InetSocketAddress|Socket);\s*$\n?', '', text, flags=re.MULTILINE)
+          marker = 'import java.net.ConnectException;'
           imports = (
               'import java.net.ConnectException;\n'
               'import java.net.InetAddress;\n'
               'import java.net.InetSocketAddress;\n'
               'import java.net.Socket;'
           )
-          if import_marker not in text:
+          if marker not in text:
               raise SystemExit('ConnectException import marker not found')
-          text = text.replace(import_marker, imports, 1)
+          text = text.replace(marker, imports, 1)
 
+          helper_marker = '    private static JsonObject deepSeekMessage(String content) {'
           helper = '''    private static void logNetworkDiagnostics(URI uri, String providerName) {
         String host = uri.getHost();
         System.out.println("[Minecraft AI Agent][" + providerName + "] NET DIAGNOSTICS START host=" + host + " port=443");
@@ -92,19 +92,17 @@ jobs:
     }
 
 '''
-
-          helper_marker = '    private static JsonObject deepSeekMessage(String content) {'
           if 'private static void logNetworkDiagnostics(URI uri, String providerName)' not in text:
               if helper_marker not in text:
                   raise SystemExit('deepSeekMessage marker not found')
               text = text.replace(helper_marker, helper + helper_marker, 1)
 
-          call = '        logNetworkDiagnostics(request.uri(), providerName)'
+          call = '        logNetworkDiagnostics(request.uri(), providerName);'
           send_line = '        return sendWithRetry(request, providerName, 0)'
           if call not in text:
               if send_line not in text:
                   raise SystemExit('sendWithRetry marker not found')
-              text = text.replace(send_line, call + ';\n' + send_line, 1)
+              text = text.replace(send_line, call + '\n' + send_line, 1)
 
           path.write_text(text, encoding='utf-8')
           PY
