@@ -39,11 +39,11 @@ public final class AiChatScreen extends Screen {
         int keyY = panelTop + 31;
         apiKeyInput = new TextFieldWidget(
                 textRenderer, panelLeft + 14, keyY,
-                panelWidth - 150, 20, Text.literal("Gemini API key")
+                panelWidth - 150, 20, Text.literal("DeepSeek API key")
         );
         apiKeyInput.setMaxLength(300);
         apiKeyInput.setText(AiClientConfig.getApiKey());
-        apiKeyInput.setPlaceholder(Text.literal("Вставь Gemini API key один раз — он сохранится локально"));
+        apiKeyInput.setPlaceholder(Text.literal("Вставь DeepSeek API key один раз — он сохранится локально"));
         addDrawableChild(apiKeyInput);
 
         addDrawableChild(ButtonWidget.builder(
@@ -74,14 +74,14 @@ public final class AiChatScreen extends Screen {
     private void saveApiKey() {
         AiClientConfig.setApiKey(apiKeyInput.getText());
         messages.add(AiClientConfig.hasApiKey()
-                ? "AI: Gemini API key сохранён локально."
+                ? "AI: DeepSeek API key сохранён локально."
                 : "AI: API key очищен.");
     }
 
     private void testConnection() {
         if (waiting) return;
         waiting = true;
-        messages.add("AI: Проверяю подключение к Gemini...");
+        messages.add("AI: Проверяю подключение к DeepSeek...");
         AiAgentService.testConnection().handle((ok, throwable) -> {
             MinecraftClient client = MinecraftClient.getInstance();
             client.execute(() -> {
@@ -90,7 +90,7 @@ public final class AiChatScreen extends Screen {
                     Throwable cause = throwable.getCause() != null ? throwable.getCause() : throwable;
                     messages.add("AI: Ошибка: " + (cause.getMessage() == null ? cause.toString() : cause.getMessage()));
                 } else {
-                    messages.add(ok ? "AI: Gemini подключён и отвечает." : "AI: Gemini не вернул ожидаемый ответ.");
+                    messages.add(ok ? "AI: DeepSeek подключён и отвечает." : "AI: DeepSeek не вернул ожидаемый ответ.");
                 }
             });
             return null;
@@ -104,7 +104,7 @@ public final class AiChatScreen extends Screen {
         if (message.isEmpty()) return;
 
         if (!AiClientConfig.hasApiKey()) {
-            messages.add("AI: Сначала вставь Gemini API key сверху и нажми «Сохранить key».");
+            messages.add("AI: Сначала вставь DeepSeek API key сверху и нажми «Сохранить key».");
             return;
         }
 
@@ -146,7 +146,7 @@ public final class AiChatScreen extends Screen {
 
         context.drawTextWithShadow(textRenderer, title, panelLeft + 14, panelTop + 10, 0xFFFFFF);
         context.drawTextWithShadow(textRenderer,
-                waiting ? "ИИ выполняет действия в мире..." : "Gemini AI Agent",
+                waiting ? "ИИ выполняет действия в мире..." : "DeepSeek AI Agent",
                 panelLeft + 14, panelTop + 62,
                 waiting ? 0xA0FFA0 : 0xB0B0B8
         );
