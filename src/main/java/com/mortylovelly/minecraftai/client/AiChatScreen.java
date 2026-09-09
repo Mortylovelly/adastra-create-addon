@@ -9,7 +9,6 @@ import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.text.Text;
 
-import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -18,6 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 public final class AiChatScreen extends Screen {
@@ -25,6 +25,7 @@ public final class AiChatScreen extends Screen {
     private static final HttpClient HTTP = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(3))
             .build();
+    private static final String SESSION_ID = UUID.randomUUID().toString();
 
     private final List<String> messages = new ArrayList<>();
     private TextFieldWidget input;
@@ -79,7 +80,8 @@ public final class AiChatScreen extends Screen {
         waiting = true;
         sendButton.active = false;
 
-        String json = "{\"message\":" + quoteJson(message) + "}";
+        String json = "{\"message\":" + quoteJson(message)
+                + ",\"session_id\":" + quoteJson(SESSION_ID) + "}";
         HttpRequest request = HttpRequest.newBuilder(CHAT_URI)
                 .timeout(Duration.ofSeconds(120))
                 .header("Content-Type", "application/json; charset=UTF-8")
