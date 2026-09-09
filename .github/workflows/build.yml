@@ -1,0 +1,82 @@
+name: Build Minecraft AI Agent
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: temurin
+
+      - name: Fix command tool source
+        shell: bash
+        run: |
+          set -e
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java')
+          text = path.read_text(encoding='utf-8')
+
+          old = '            int result = server.getCommandManager().executeWithPrefix(server.getCommandSource(), command);'
+          new = '            server.getCommandManager().executeWithPrefix(server.getCommandSource(), command);'
+
+          changed = False
+          if old in text:
+              text = text.replace(old, new, 1)
+              changed = True
+
+          result_line = '            data.addProperty("result", result);'
+          if result_line in text:
+              text = text.replace(result_line, '', 1)
+              changed = True
+
+          path.write_text(text, encoding='utf-8')
+          print('Command tool source changed:', changed)
+          print('Broken assignment remains:', old in text)
+          PY
+
+      - name: Commit fixed source
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          set -e
+          if git diff --quiet -- src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java; then
+            echo "Source already fixed."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java
+          git commit -m "Fix command tool compilation [skip ci]"
+          git push origin HEAD:main
+
+      - name: Grant Gradle permission
+        run: chmod +x gradlew
+
+      - name: Build
+        run: ./gradlew build --no-daemon
+
+      - name: Upload mod jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: minecraft-ai-agent
+          path: build/libs/*.jar
