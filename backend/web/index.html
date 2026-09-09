@@ -5,20 +5,122 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Minecraft AI Agent</title>
   <style>
-    :root { color-scheme: dark; font-family: Inter, system-ui, sans-serif; }
-    body { margin: 0; min-height: 100vh; background: #111318; color: #eee; display: grid; place-items: center; }
-    .app { width: min(900px, 94vw); height: min(720px, 92vh); display: flex; flex-direction: column; border: 1px solid #2f3440; border-radius: 16px; overflow: hidden; background: #181b21; box-shadow: 0 18px 60px #0008; }
-    header { padding: 18px 22px; border-bottom: 1px solid #2f3440; display: flex; justify-content: space-between; align-items: center; }
-    h1 { font-size: 18px; margin: 0; }
-    #status { font-size: 12px; color: #999; }
-    #messages { flex: 1; overflow: auto; padding: 22px; display: flex; flex-direction: column; gap: 12px; }
-    .msg { max-width: 82%; padding: 11px 14px; border-radius: 12px; white-space: pre-wrap; line-height: 1.4; }
-    .user { align-self: flex-end; background: #2d5cff; }
-    .ai { align-self: flex-start; background: #262b33; }
-    form { display: flex; gap: 10px; padding: 16px; border-top: 1px solid #2f3440; }
-    input { flex: 1; background: #111318; border: 1px solid #343a46; border-radius: 10px; color: #eee; padding: 12px; outline: none; }
-    button { border: 0; border-radius: 10px; padding: 0 18px; background: #2d5cff; color: white; font-weight: 700; cursor: pointer; }
-    button:disabled { opacity: .5; cursor: default; }
+    :root {
+      color-scheme: dark;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: #111318;
+      color: #e8e8e8;
+      display: grid;
+      place-items: center;
+    }
+
+    .app {
+      width: min(620px, 92vw);
+      height: min(560px, 84vh);
+      display: flex;
+      flex-direction: column;
+      border: 1px solid #30343d;
+      border-radius: 10px;
+      overflow: hidden;
+      background: #181b21;
+    }
+
+    header {
+      min-height: 48px;
+      padding: 0 16px;
+      border-bottom: 1px solid #30343d;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    h1 {
+      font-size: 15px;
+      font-weight: 600;
+      margin: 0;
+    }
+
+    #status {
+      font-size: 11px;
+      color: #9a9da5;
+      white-space: nowrap;
+    }
+
+    #messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      scrollbar-width: thin;
+    }
+
+    .msg {
+      max-width: 78%;
+      padding: 8px 10px;
+      border-radius: 8px;
+      white-space: pre-wrap;
+      line-height: 1.35;
+      font-size: 13px;
+      overflow-wrap: anywhere;
+    }
+
+    .user {
+      align-self: flex-end;
+      background: #2b55c7;
+    }
+
+    .ai {
+      align-self: flex-start;
+      background: #262a31;
+    }
+
+    form {
+      display: flex;
+      gap: 8px;
+      padding: 10px;
+      border-top: 1px solid #30343d;
+    }
+
+    input {
+      min-width: 0;
+      flex: 1;
+      background: #111318;
+      border: 1px solid #343944;
+      border-radius: 7px;
+      color: #eee;
+      padding: 9px 10px;
+      font-size: 13px;
+      outline: none;
+    }
+
+    input:focus {
+      border-color: #596172;
+    }
+
+    button {
+      border: 0;
+      border-radius: 7px;
+      padding: 0 13px;
+      background: #2b55c7;
+      color: white;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      opacity: .5;
+      cursor: default;
+    }
   </style>
 </head>
 <body>
@@ -27,14 +129,17 @@
     <h1>Minecraft AI Agent</h1>
     <div id="status">Проверка связи...</div>
   </header>
+
   <main id="messages">
-    <div class="msg ai">Привет. Я подключён к AI bridge. Напиши, что сделать в Minecraft.</div>
+    <div class="msg ai">Привет. Напиши, что сделать в Minecraft.</div>
   </main>
+
   <form id="form">
-    <input id="input" autocomplete="off" placeholder="Например: осмотри территорию вокруг меня">
+    <input id="input" autocomplete="off" placeholder="Например: выдай мне алмазный меч">
     <button id="send">Отправить</button>
   </form>
 </div>
+
 <script>
   const form = document.getElementById('form');
   const input = document.getElementById('input');
@@ -54,7 +159,9 @@
     try {
       const response = await fetch('/health');
       const data = await response.json();
-      status.textContent = data.bridge?.connected ? `Minecraft: онлайн · ${data.model}` : `Minecraft bridge: офлайн · ${data.model}`;
+      status.textContent = data.bridge?.connected
+        ? `Minecraft: онлайн · ${data.model}`
+        : `Minecraft: офлайн · ${data.model}`;
     } catch {
       status.textContent = 'Backend: офлайн';
     }
@@ -87,6 +194,7 @@
     }
   });
 
+  input.focus();
   refreshStatus();
   setInterval(refreshStatus, 5000);
 </script>
