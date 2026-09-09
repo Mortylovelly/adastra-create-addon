@@ -87,8 +87,8 @@ public final class AiAgentService {
             return CompletableFuture.completedFuture("Сначала укажи " + providerName(provider) + " API key в поле сверху.");
         }
 
-        AiAgentStatus.set("Анализирую запрос");        AiAgentStatus.set("Анализирую запрос");        AiAgentStatus.set("Анализирую запрос");        AiAgentStatus.set("Анализирую запрос");        AiAgentStatus.set("Анализирую запрос");
-        AiAgentLog.info("TASK START provider=" + providerName(provider) + " chars=" + message.length());        AiAgentLog.info("TASK START provider=" + providerName(provider) + " chars=" + message.length());        AiAgentLog.info("TASK START provider=" + providerName(provider) + " chars=" + message.length());        AiAgentLog.info("TASK START provider=" + providerName(provider) + " chars=" + message.length());        AiAgentLog.info("TASK START provider=" + providerName(provider) + " chars=" + message.length());
+        AiAgentStatus.set("Анализирую запрос");
+        AiAgentLog.info("TASK START provider=" + providerName(provider) + " chars=" + message.length());
         System.out.println("[Minecraft AI Agent][" + providerName(provider) + "] TASK START chars=" + message.length());
 
         if (provider.equals("deepseek")) {
@@ -107,7 +107,8 @@ public final class AiAgentService {
             payload.addProperty("instructions", "Reply with exactly: OK");
             payload.addProperty("input", "Connection test");
             payload.addProperty("max_output_tokens", 32);
-            AiAgentStatus.set("Проверяю подключение к DeepSeek");        AiAgentStatus.set("Проверяю подключение к DeepSeek");        AiAgentStatus.set("Проверяю подключение к DeepSeek");        AiAgentStatus.set("Проверяю подключение к DeepSeek");        AiAgentStatus.set("Проверяю подключение к DeepSeek");
+            AiAgentStatus.set("Проверяю подключение к DeepSeek");
+        AiAgentStatus.set("Проверяю подключение к DeepSeek");
         return request(DEEPSEEK_URI, AiClientConfig.getDeepSeekApiKey(), payload, "DeepSeek")
                     .thenApply(root -> root.has("output_text")
                             && !root.get("output_text").isJsonNull()
@@ -123,7 +124,7 @@ public final class AiAgentService {
         payload.addProperty("temperature", 0);
         payload.addProperty("max_tokens", 32);
 
-        AiAgentStatus.set("Проверяю подключение к " + providerName(provider));        AiAgentStatus.set("Проверяю подключение к " + providerName(provider));        AiAgentStatus.set("Проверяю подключение к " + providerName(provider));        AiAgentStatus.set("Проверяю подключение к " + providerName(provider));        AiAgentStatus.set("Проверяю подключение к " + providerName(provider));
+        AiAgentStatus.set("Проверяю подключение к " + providerName(provider));
         return request(uriForProvider(provider), keyForProvider(provider), payload, providerName(provider))
                 .thenApply(root -> {
                     JsonObject choice = firstChoice(root);
@@ -171,7 +172,7 @@ public final class AiAgentService {
             payload.add("messages", array);
         }
 
-        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
+        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
         return request(uriForProvider(provider), keyForProvider(provider), payload, providerName(provider))
                 .thenCompose(response -> {
                     JsonObject choice = firstChoice(response);
@@ -191,7 +192,8 @@ public final class AiAgentService {
                         String text = assistant.has("content") && !assistant.get("content").isJsonNull()
                                 ? assistant.get("content").getAsString()
                                 : "Ответ без текста.";
-                        AiAgentStatus.clear();                        AiAgentStatus.clear();                        AiAgentStatus.clear();
+                        AiAgentStatus.clear();
+        AiAgentStatus.clear();
                         AiAgentLog.info("TASK END provider=" + providerName(provider) + " rounds=" + round + " toolCalls=" + totalCalls);
                         System.out.println("[Minecraft AI Agent][" + providerName(provider) + "] TASK END rounds=" + round + " toolCalls=" + totalCalls);
                         return CompletableFuture.completedFuture(text);
@@ -289,7 +291,7 @@ public final class AiAgentService {
             payload.add("input", inputArray);
         }
 
-        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
+        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
         return request(DEEPSEEK_URI, AiClientConfig.getDeepSeekApiKey(), payload, "DeepSeek")
                 .thenCompose(response -> {
                     JsonArray output = response.has("output") && response.get("output").isJsonArray()
@@ -312,7 +314,8 @@ public final class AiAgentService {
                         String text = response.has("output_text") && !response.get("output_text").isJsonNull()
                                 ? response.get("output_text").getAsString()
                                 : "DeepSeek не вернул текстовый ответ.";
-                        AiAgentStatus.clear();                        AiAgentStatus.clear();                        AiAgentStatus.clear();
+                        AiAgentStatus.clear();
+        AiAgentStatus.clear();
                         AiAgentLog.info("TASK END provider=DeepSeek rounds=" + round + " toolCalls=" + totalCalls);
                         System.out.println("[Minecraft AI Agent][DeepSeek] TASK END rounds=" + round + " toolCalls=" + totalCalls);
                         return CompletableFuture.completedFuture(text);
@@ -364,8 +367,8 @@ public final class AiAgentService {
             return CompletableFuture.completedFuture(cached.deepCopy());
         }
 
-        AiAgentStatus.set(statusForTool(name));        AiAgentStatus.set(statusForTool(name));        AiAgentStatus.set(statusForTool(name));        AiAgentStatus.set(statusForTool(name));        AiAgentStatus.set(statusForTool(name));
-        AiAgentLog.info("TOOL CALL name=" + name + " args=" + compactJson(arguments, 700));        AiAgentLog.info("TOOL CALL name=" + name + " args=" + compactJson(arguments, 700));        AiAgentLog.info("TOOL CALL name=" + name + " args=" + compactJson(arguments, 700));        AiAgentLog.info("TOOL CALL name=" + name + " args=" + compactJson(arguments, 700));        AiAgentLog.info("TOOL CALL name=" + name + " args=" + compactJson(arguments, 700));
+        AiAgentStatus.set(statusForTool(name));
+        AiAgentLog.info("TOOL CALL name=" + name + " args=" + compactJson(arguments, 700));
         System.out.println("[Minecraft AI Agent] TOOL CALL name=" + name + " args=" + compactJson(arguments, 700));
 
         MinecraftClient client = MinecraftClient.getInstance();
@@ -384,7 +387,8 @@ public final class AiAgentService {
                 JsonObject error = new JsonObject();
                 error.addProperty("ok", false);
                 error.addProperty("error", exception.getMessage() == null ? exception.toString() : exception.getMessage());
-                AiAgentLog.error("TOOL ERROR name=" + name + " message=" + error.get("error").getAsString());                AiAgentLog.error("TOOL ERROR name=" + name + " message=" + error.get("error").getAsString());                AiAgentLog.error("TOOL ERROR name=" + name + " message=" + error.get("error").getAsString());                AiAgentLog.error("TOOL ERROR name=" + name + " message=" + error.get("error").getAsString());                AiAgentLog.error("TOOL ERROR name=" + name + " message=" + error.get("error").getAsString());
+                AiAgentLog.error("TOOL ERROR name=" + name + " message=" + error.get("error").getAsString());
+        AiAgentLog.error("TOOL ERROR name=" + name + " message=" + error.get("error").getAsString());
                 future.complete(error);
             }
         });
@@ -848,7 +852,8 @@ public final class AiAgentService {
                         errorText = truncate(body, 900);
                     }
 
-                    AiAgentLog.error("API ERROR provider=" + providerName + " status=" + response.statusCode() + " message=" + truncate(errorText, 500));                    AiAgentLog.error("API ERROR provider=" + providerName + " status=" + response.statusCode() + " message=" + truncate(errorText, 500));                    AiAgentLog.error("API ERROR provider=" + providerName + " status=" + response.statusCode() + " message=" + truncate(errorText, 500));                    AiAgentLog.error("API ERROR provider=" + providerName + " status=" + response.statusCode() + " message=" + truncate(errorText, 500));                    AiAgentLog.error("API ERROR provider=" + providerName + " status=" + response.statusCode() + " message=" + truncate(errorText, 500));
+                    AiAgentLog.error("API ERROR provider=" + providerName + " status=" + response.statusCode() + " message=" + truncate(errorText, 500));
+        AiAgentLog.error("API ERROR provider=" + providerName + " status=" + response.statusCode() + " message=" + truncate(errorText, 500));
                     return CompletableFuture.failedFuture(new IOException(
                             providerName + " API " + response.statusCode() + ": " + errorText));
                 });
