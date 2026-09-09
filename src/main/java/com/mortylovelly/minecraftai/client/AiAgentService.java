@@ -544,10 +544,10 @@ public final class AiAgentService {
 
     private static JsonObject commandResult(MinecraftServer server, String command) {
         try {
-            int result = server.getCommandManager().executeWithPrefix(server.getCommandSource(), command);
+            server.getCommandManager().executeWithPrefix(server.getCommandSource(), command);
             JsonObject data = new JsonObject();
             data.addProperty("executed", true);
-            data.addProperty("result", result);
+
             return data;
         } catch (Exception exception) {
             JsonObject data = new JsonObject();
