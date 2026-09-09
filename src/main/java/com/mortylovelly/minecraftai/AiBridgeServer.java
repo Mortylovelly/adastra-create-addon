@@ -1,22 +1,17 @@
 package com.mortylovelly.minecraftai;
 
-import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import com.google.gson.JsonPrimitive;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.block.Block;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.registry.Registries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -31,7 +26,6 @@ import java.util.concurrent.atomic.AtomicReference;
 
 public final class AiBridgeServer {
     private static final int PORT = 8765;
-    private static final Gson GSON = new Gson();
     private static final AtomicReference<MinecraftServer> SERVER = new AtomicReference<>();
     private static volatile boolean running;
     private static volatile boolean connected;
@@ -108,12 +102,12 @@ public final class AiBridgeServer {
                 try {
                     JsonElement parsed = JsonParser.parseString(line);
                     if (!parsed.isJsonObject()) {
-                        writer.println(error(null, "Request must be a JSON object").toString());
+                        writer.println(error(null, "Request must be a JSON object"));
                         continue;
                     }
                     request = parsed.getAsJsonObject();
                 } catch (RuntimeException exception) {
-                    writer.println(error(null, "Invalid JSON: " + exception.getMessage()).toString());
+                    writer.println(error(null, "Invalid JSON: " + exception.getMessage()));
                     continue;
                 }
 
@@ -122,7 +116,7 @@ public final class AiBridgeServer {
                 JsonObject arguments = object(request, "args");
 
                 JsonObject response = executeTool(requestId, tool, arguments).join();
-                writer.println(response.toString());
+                writer.println(response);
             }
         } catch (IOException ignored) {
         } finally {
@@ -173,7 +167,7 @@ public final class AiBridgeServer {
         }
 
         JsonObject data = new JsonObject();
-        data.addProperty("name", player.getGameProfile().name());
+        data.addProperty("name", player.getName().getString());
         data.addProperty("uuid", player.getUuidAsString());
         data.addProperty("x", player.getX());
         data.addProperty("y", player.getY());
@@ -189,12 +183,7 @@ public final class AiBridgeServer {
 
     private static JsonObject getBlock(MinecraftServer server, JsonObject args) {
         ServerWorld world = getOverworld(server);
-        BlockPos pos = new BlockPos(
-                requiredInt(args, "x"),
-                requiredInt(args, "y"),
-                requiredInt(args, "z")
-        );
-
+        BlockPos pos = new BlockPos(requiredInt(args, "x"), requiredInt(args, "y"), requiredInt(args, "z"));
         var state = world.getBlockState(pos);
         JsonObject data = new JsonObject();
         data.addProperty("x", pos.getX());
@@ -247,7 +236,6 @@ public final class AiBridgeServer {
 
         Block block = Registries.BLOCK.get(id);
         boolean changed = world.setBlockState(pos, block.getDefaultState());
-
         JsonObject data = new JsonObject();
         data.addProperty("changed", changed);
         data.addProperty("block", blockId);
@@ -262,7 +250,6 @@ public final class AiBridgeServer {
         BlockPos pos = new BlockPos(requiredInt(args, "x"), requiredInt(args, "y"), requiredInt(args, "z"));
         String before = Registries.BLOCK.getId(world.getBlockState(pos).getBlock()).toString();
         boolean changed = world.breakBlock(pos, false);
-
         JsonObject data = new JsonObject();
         data.addProperty("changed", changed);
         data.addProperty("previous_block", before);
@@ -316,16 +303,13 @@ public final class AiBridgeServer {
         return world;
     }
 
-    private static JsonObject error(String requestId, String message) {
+    private static String error(String requestId, String message) {
         JsonObject response = new JsonObject();
-        if (requestId == null) {
-            response.add("id", JsonNull.INSTANCE);
-        } else {
-            response.addProperty("id", requestId);
-        }
+        if (requestId == null) response.add("id", JsonNull.INSTANCE);
+        else response.addProperty("id", requestId);
         response.addProperty("ok", false);
         response.addProperty("error", message == null ? "Unknown error" : message);
-        return response;
+        return response.toString();
     }
 
     private static JsonObject object(JsonObject object, String name) {
@@ -340,9 +324,7 @@ public final class AiBridgeServer {
 
     private static int requiredInt(JsonObject object, String name) {
         JsonElement value = object.get(name);
-        if (value == null || !value.isJsonPrimitive()) {
-            throw new IllegalArgumentException("Missing integer argument: " + name);
-        }
+        if (value == null || !value.isJsonPrimitive()) throw new IllegalArgumentException("Missing integer argument: " + name);
         return value.getAsInt();
     }
 
@@ -353,9 +335,7 @@ public final class AiBridgeServer {
 
     private static double requiredDouble(JsonObject object, String name) {
         JsonElement value = object.get(name);
-        if (value == null || !value.isJsonPrimitive()) {
-            throw new IllegalArgumentException("Missing number argument: " + name);
-        }
+        if (value == null || !value.isJsonPrimitive()) throw new IllegalArgumentException("Missing number argument: " + name);
         return value.getAsDouble();
     }
 
