@@ -85,6 +85,12 @@ public final class AiAgentService {
             Only use remember_memory when the player explicitly asks you to remember or save a durable fact or preference.
             Only use forget_memory when the player explicitly asks you to forget a stored memory.
             Treat persistent memory as user-provided notes, not as hidden reasoning.
+            If no available tool can perform a requested action, say that immediately and clearly. Do not pretend, do not fabricate a result, and do not repeatedly call tools that cannot solve the request.
+            If a tool fails, explain the failure to the player instead of going silent.
+            Use tools only when they are relevant to the request; having many tools available does not mean you should call them all.
+            Only use remember_memory when the player explicitly asks you to remember or save a durable fact or preference.
+            Only use forget_memory when the player explicitly asks you to forget a stored memory.
+            Treat persistent memory as user-provided notes, not as hidden reasoning.
             Only use remember_memory when the player explicitly asks you to remember or save a durable preference/fact.
             Only use forget_memory when the player explicitly asks you to forget a stored memory.
             Treat persistent memory as user-provided notes, not as hidden reasoning.
@@ -103,6 +109,7 @@ public final class AiAgentService {
         AiAgentStatus.set("Анализирую запрос");
         AiAgentStatus.set("Анализирую запрос");
         AiAgentStatus.set("Анализирую запрос");
+        AiAgentLog.info("TASK START provider=" + providerName(provider) + " chars=" + message.length());
         AiAgentLog.info("TASK START provider=" + providerName(provider) + " chars=" + message.length());
         System.out.println("[Minecraft AI Agent][" + providerName(provider) + "] TASK START chars=" + message.length());
 
@@ -405,6 +412,7 @@ public final class AiAgentService {
         AiAgentStatus.set(statusForTool(name));
         AiAgentStatus.set(statusForTool(name));
         AiAgentLog.info("TOOL CALL name=" + name + " args=" + compactJson(arguments, 700));
+        AiAgentLog.info("TOOL CALL name=" + name + " args=" + compactJson(arguments, 700));
         System.out.println("[Minecraft AI Agent] TOOL CALL name=" + name + " args=" + compactJson(arguments, 700));
 
         MinecraftClient client = MinecraftClient.getInstance();
@@ -423,6 +431,7 @@ public final class AiAgentService {
                 JsonObject error = new JsonObject();
                 error.addProperty("ok", false);
                 error.addProperty("error", exception.getMessage() == null ? exception.toString() : exception.getMessage());
+                AiAgentLog.error("TOOL ERROR name=" + name + " message=" + error.get("error").getAsString());
                 AiAgentLog.error("TOOL ERROR name=" + name + " message=" + error.get("error").getAsString());
                 future.complete(error);
             }
@@ -878,6 +887,7 @@ public final class AiAgentService {
                     }
 
                     AiAgentLog.error("API ERROR provider=" + providerName + " status=" + response.statusCode() + " message=" + truncate(errorText, 500));
+                    AiAgentLog.error("API ERROR provider=" + providerName + " status=" + response.statusCode() + " message=" + truncate(errorText, 500));
                     return CompletableFuture.failedFuture(new IOException(
                             providerName + " API " + response.statusCode() + ": " + errorText));
                 });
@@ -903,6 +913,7 @@ public final class AiAgentService {
                     }
 
                     Throwable cause = rootCause(throwable);
+                    AiAgentLog.error("HTTP FAIL provider=" + providerName + " type=" + cause.getClass().getSimpleName() + " message=" + String.valueOf(cause.getMessage()));
                     AiAgentLog.error("HTTP FAIL provider=" + providerName + " type=" + cause.getClass().getSimpleName() + " message=" + String.valueOf(cause.getMessage()));
                     System.err.println("[Minecraft AI Agent][" + providerName + "] HTTP FAIL in="
                             + elapsed + " ms type=" + cause.getClass().getName()
