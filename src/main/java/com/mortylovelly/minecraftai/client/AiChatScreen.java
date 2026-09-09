@@ -14,7 +14,6 @@ import java.util.concurrent.CompletableFuture;
 public final class AiChatScreen extends Screen {
     private final List<String> messages = new ArrayList<>();
     private TextFieldWidget messageInput;
-    private TextFieldWidget apiKeyInput;
     private ButtonWidget sendButton;
     private boolean waiting;
     private int panelLeft;
@@ -24,7 +23,8 @@ public final class AiChatScreen extends Screen {
 
     public AiChatScreen() {
         super(Text.literal("Minecraft AI Agent"));
-        messages.add("AI: Я готов. Напиши, что сделать в мире.");
+        messages.add("AI: Готов. Я могу выполнять действия в мире через инструменты.");
+        messages.add("AI: Например: «выдай мне алмазный меч» или «построй дом рядом со мной».");
     }
 
     @Override
@@ -46,27 +46,31 @@ public final class AiChatScreen extends Screen {
                 .dimensions(panelLeft + panelWidth - 92, inputY, 78, 22)
                 .build());
 
-        int keyY = panelTop + 31;
-        apiKeyInput = new TextFieldWidget(textRenderer, panelLeft + 14, keyY,
-                panelWidth - 150, 20, Text.literal("OpenAI API key"));
-        apiKeyInput.setMaxLength(300);
-        apiKeyInput.setText(AiClientConfig.getApiKey());
-        apiKeyInput.setPlaceholder(Text.literal("Вставь OpenAI API key один раз — он сохранится локально"));
-        addDrawableChild(apiKeyInput);
-
         addDrawableChild(ButtonWidget.builder(
-                        Text.literal("Сохранить key"), button -> saveApiKey())
-                .dimensions(panelLeft + panelWidth - 126, keyY, 112, 20)
+                        Text.literal("Проверить AI"), button -> testConnection())
+                .dimensions(panelLeft + panelWidth - 126, panelTop + 9, 112, 20)
                 .build());
 
         setInitialFocus(messageInput);
     }
 
-    private void saveApiKey() {
-        AiClientConfig.setApiKey(apiKeyInput.getText());
-        messages.add(AiClientConfig.hasApiKey()
-                ? "AI: API key сохранён."
-                : "AI: API key очищен.");
+    private void testConnection() {
+        if (waiting) return;
+        waiting = true;
+        messages.add("AI: Проверяю подключение к backend...");
+        AiAgentService.testBackend().handle((reply, throwable) -> {
+            MinecraftClient client = MinecraftClient.getInstance();
+            client.execute(() -> {
+                waiting = false;
+                if (throwable != null) {
+                    Throwable cause = throwable.getCause() != null ? throwable.getCause() : throwable;
+                    messages.add("AI: Ошибка: " + cause.getMessage());
+                } else {
+                    messages.add("AI: " + reply);
+                }
+            });
+            return null;
+        });
     }
 
     private void sendMessage() {
@@ -74,11 +78,6 @@ public final class AiChatScreen extends Screen {
 
         String message = messageInput.getText().trim();
         if (message.isEmpty()) return;
-
-        if (!AiClientConfig.hasApiKey()) {
-            messages.add("AI: Сначала вставь OpenAI API key сверху и нажми «Сохранить key».");
-            return;
-        }
 
         messages.add("Ты: " + message);
         messageInput.setText("");
@@ -105,7 +104,6 @@ public final class AiChatScreen extends Screen {
 
     @Override
     public void renderBackground(DrawContext context, int mouseX, int mouseY, float delta) {
-        // No vanilla blur. The world stays sharp behind a translucent overlay.
         context.fill(0, 0, width, height, 0x55000000);
     }
 
@@ -115,15 +113,15 @@ public final class AiChatScreen extends Screen {
 
         context.fill(panelLeft, panelTop, panelLeft + panelWidth, panelTop + panelHeight, 0xF0121216);
         context.fill(panelLeft, panelTop, panelLeft + panelWidth, panelTop + 1, 0xFFFFFFFF);
-        context.fill(panelLeft, panelTop + 57, panelLeft + panelWidth, panelTop + 58, 0xFF303038);
+        context.fill(panelLeft, panelTop + 39, panelLeft + panelWidth, panelTop + 40, 0xFF303038);
 
-        context.drawTextWithShadow(textRenderer, title, panelLeft + 14, panelTop + 10, 0xFFFFFF);
+        context.drawTextWithShadow(textRenderer, title, panelLeft + 14, panelTop + 11, 0xFFFFFF);
         context.drawTextWithShadow(textRenderer,
-                waiting ? "ИИ выполняет действия в мире..." : "Minecraft AI Agent",
-                panelLeft + 14, panelTop + 62,
+                waiting ? "ИИ выполняет действия в мире..." : "Подключён через локальный AI backend",
+                panelLeft + 14, panelTop + 46,
                 waiting ? 0xA0FFA0 : 0xB0B0B8);
 
-        int chatTop = panelTop + 82;
+        int chatTop = panelTop + 65;
         int chatBottom = panelTop + panelHeight - 46;
         int maxWidth = panelWidth - 28;
         int y = chatBottom;
