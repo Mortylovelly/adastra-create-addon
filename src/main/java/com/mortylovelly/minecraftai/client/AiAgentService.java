@@ -89,6 +89,7 @@ public final class AiAgentService {
             return CompletableFuture.completedFuture("Сначала укажи " + providerName(provider) + " API key в поле сверху.");
         }
 
+        AiAgentStatus.set("Анализирую запрос");
         System.out.println("[Minecraft AI Agent][" + providerName(provider) + "] TASK START chars=" + message.length());
 
         if (provider.equals("deepseek")) {
@@ -107,7 +108,8 @@ public final class AiAgentService {
             payload.addProperty("instructions", "Reply with exactly: OK");
             payload.addProperty("input", "Connection test");
             payload.addProperty("max_output_tokens", 32);
-            return request(DEEPSEEK_URI, AiClientConfig.getDeepSeekApiKey(), payload, "DeepSeek")
+            AiAgentStatus.set("Проверяю подключение к DeepSeek");
+        return request(DEEPSEEK_URI, AiClientConfig.getDeepSeekApiKey(), payload, "DeepSeek")
                     .thenApply(root -> root.has("output_text")
                             && !root.get("output_text").isJsonNull()
                             && !root.get("output_text").getAsString().isBlank());
@@ -122,6 +124,7 @@ public final class AiAgentService {
         payload.addProperty("temperature", 0);
         payload.addProperty("max_tokens", 32);
 
+        AiAgentStatus.set("Проверяю подключение к " + providerName(provider));
         return request(uriForProvider(provider), keyForProvider(provider), payload, providerName(provider))
                 .thenApply(root -> {
                     JsonObject choice = firstChoice(root);
@@ -163,6 +166,7 @@ public final class AiAgentService {
             payload.add("messages", array);
         }
 
+        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
         return request(uriForProvider(provider), keyForProvider(provider), payload, providerName(provider))
                 .thenCompose(response -> {
                     JsonObject choice = firstChoice(response);
@@ -178,9 +182,11 @@ public final class AiAgentService {
                     messages.add(assistant.deepCopy());
 
                     if (toolCalls.isEmpty()) {
+                        AiAgentStatus.set("Формирую ответ");
                         String text = assistant.has("content") && !assistant.get("content").isJsonNull()
                                 ? assistant.get("content").getAsString()
                                 : "Ответ без текста.";
+                        AiAgentStatus.clear();
                         System.out.println("[Minecraft AI Agent][" + providerName(provider) + "] TASK END rounds=" + round + " toolCalls=" + totalCalls);
                         return CompletableFuture.completedFuture(text);
                     }
@@ -195,6 +201,7 @@ public final class AiAgentService {
                         if (!element.isJsonObject()) continue;
                         JsonObject call = element.getAsJsonObject();
                         validCalls.add(call);
+                        AiAgentStatus.set(statusForTool(toolName(call)));
                         results.add(executeOpenAiToolAsync(call, executedCalls));
                     }
 
@@ -270,6 +277,7 @@ public final class AiAgentService {
             payload.add("input", inputArray);
         }
 
+        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
         return request(DEEPSEEK_URI, AiClientConfig.getDeepSeekApiKey(), payload, "DeepSeek")
                 .thenCompose(response -> {
                     JsonArray output = response.has("output") && response.get("output").isJsonArray()
@@ -288,9 +296,11 @@ public final class AiAgentService {
                     }
 
                     if (calls.isEmpty()) {
+                        AiAgentStatus.set("Формирую ответ");
                         String text = response.has("output_text") && !response.get("output_text").isJsonNull()
                                 ? response.get("output_text").getAsString()
                                 : "DeepSeek не вернул текстовый ответ.";
+                        AiAgentStatus.clear();
                         System.out.println("[Minecraft AI Agent][DeepSeek] TASK END rounds=" + round + " toolCalls=" + totalCalls);
                         return CompletableFuture.completedFuture(text);
                     }
@@ -299,6 +309,7 @@ public final class AiAgentService {
                     int nextRound = round + 1;
                     List<CompletableFuture<JsonObject>> results = new ArrayList<>();
                     for (JsonObject call : calls) {
+                        AiAgentStatus.set(statusForTool(string(call, "name", "unknown")));
                         results.add(executeToolWithCache(
                                 string(call, "name", ""),
                                 parseArguments(call),
@@ -340,6 +351,7 @@ public final class AiAgentService {
             return CompletableFuture.completedFuture(cached.deepCopy());
         }
 
+        AiAgentStatus.set(statusForTool(name));
         System.out.println("[Minecraft AI Agent] TOOL CALL name=" + name + " args=" + compactJson(arguments, 700));
 
         MinecraftClient client = MinecraftClient.getInstance();
@@ -350,6 +362,7 @@ public final class AiAgentService {
         server.execute(() -> {
             try {
                 JsonObject result = executeTool(server, name, arguments);
+                AiAgentStatus.set("Готово: " + statusForTool(name));
                 executedCalls.put(key, result.deepCopy());
                 future.complete(result);
             } catch (Exception exception) {
@@ -929,6 +942,19 @@ public final class AiAgentService {
 
     private static int optionalInt(JsonObject object, String name, int fallback) {
         return object.has(name) ? object.get(name).getAsInt() : fallback;
+    }
+
+    private static String statusForTool(String name) {
+        return switch (name) {
+            case "get_player_state" -> "Получаю позицию игрока";
+            case "get_block" -> "Проверяю блок";
+            case "scan_area" -> "Сканирую область";
+            case "place_blocks" -> "Строю блоки";
+            case "fill_area" -> "Заполняю область";
+            case "break_block" -> "Ломаю блок";
+            case "give_item" -> "Выдаю предмет";
+            default -> "Выполняю действие";
+        };
     }
 
     private static String toolName(JsonObject call) {
