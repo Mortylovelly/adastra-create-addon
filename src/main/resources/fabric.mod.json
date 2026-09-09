@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "minecraft_ai_agent",
+  "version": "${version}",
+  "name": "Minecraft AI Agent",
+  "description": "Connects Minecraft 1.21.1 to an external AI agent through a local bridge.",
+  "authors": [
+    "Mortylovelly"
+  ],
+  "contact": {
+    "sources": "https://github.com/Mortylovelly/adastra-create-addon"
+  },
+  "license": "MIT",
+  "icon": "assets/minecraft_ai_agent/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "com.mortylovelly.minecraftai.MinecraftAiAgent"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "minecraft": "1.21.1",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}
