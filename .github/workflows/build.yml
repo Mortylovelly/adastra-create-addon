@@ -28,6 +28,9 @@ jobs:
       - name: Repair AI agent source
         run: python3 scripts/repair_ai_agent.py
 
+      - name: Clean duplicated diagnostics
+        run: python3 scripts/cleanup_ai_agent.py
+
       - name: Verify AI agent source
         shell: bash
         run: |
