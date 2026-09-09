@@ -96,6 +96,7 @@ public final class AiAgentService {
         AiAgentStatus.set("Анализирую запрос");
         AiAgentStatus.set("Анализирую запрос");
         AiAgentStatus.set("Анализирую запрос");
+        AiAgentStatus.set("Анализирую запрос");
         System.out.println("[Minecraft AI Agent][" + providerName(provider) + "] TASK START chars=" + message.length());
 
         if (provider.equals("deepseek")) {
@@ -118,6 +119,7 @@ public final class AiAgentService {
         AiAgentStatus.set("Проверяю подключение к DeepSeek");
         AiAgentStatus.set("Проверяю подключение к DeepSeek");
         AiAgentStatus.set("Проверяю подключение к DeepSeek");
+        AiAgentStatus.set("Проверяю подключение к DeepSeek");
         return request(DEEPSEEK_URI, AiClientConfig.getDeepSeekApiKey(), payload, "DeepSeek")
                     .thenApply(root -> root.has("output_text")
                             && !root.get("output_text").isJsonNull()
@@ -133,6 +135,7 @@ public final class AiAgentService {
         payload.addProperty("temperature", 0);
         payload.addProperty("max_tokens", 32);
 
+        AiAgentStatus.set("Проверяю подключение к " + providerName(provider));
         AiAgentStatus.set("Проверяю подключение к " + providerName(provider));
         AiAgentStatus.set("Проверяю подключение к " + providerName(provider));
         AiAgentStatus.set("Проверяю подключение к " + providerName(provider));
@@ -178,6 +181,7 @@ public final class AiAgentService {
             payload.add("messages", array);
         }
 
+        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
         AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
         AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
         AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
@@ -298,6 +302,7 @@ public final class AiAgentService {
         AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
         AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
         AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
+        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
         return request(DEEPSEEK_URI, AiClientConfig.getDeepSeekApiKey(), payload, "DeepSeek")
                 .thenCompose(response -> {
                     JsonArray output = response.has("output") && response.get("output").isJsonArray()
@@ -373,6 +378,7 @@ public final class AiAgentService {
             return CompletableFuture.completedFuture(cached.deepCopy());
         }
 
+        AiAgentStatus.set(statusForTool(name));
         AiAgentStatus.set(statusForTool(name));
         AiAgentStatus.set(statusForTool(name));
         AiAgentStatus.set(statusForTool(name));
