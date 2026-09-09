@@ -7,7 +7,7 @@ on:
     branches: [ main ]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -25,6 +25,109 @@ jobs:
 
       - name: Grant Gradle permission
         run: chmod +x gradlew
+
+      - name: Patch AI agent tool loop
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java')
+          text = path.read_text(encoding='utf-8')
+          original = text
+
+          text = text.replace(
+              'private static final int NETWORK_RETRIES = 2;',
+              'private static final int NETWORK_RETRIES = 2;\n    private static final int MAX_TOOL_ROUNDS = 8;\n    private static final int MAX_CONVERSATION_ITEMS = 10;'
+          )
+
+          text = text.replace(
+              'private static final String OPENROUTER_MODEL = "openrouter/free";',
+              'private static final String OPENROUTER_MODEL = "google/gemma-4-26b-a4b-it:free";'
+          )
+
+          text = text.replace(
+              '            Keep tool calls targeted and avoid unnecessary world changes.\n',
+              '            Keep tool calls targeted and avoid unnecessary world changes.\n            For any request that changes the world, you MUST use the Minecraft tools; never merely describe how to do it.\n            For building, first call get_player_state once, then use fill_area for large rectangular regions and place_blocks for small details.\n            Prefer the fewest tool calls possible. Do not repeat an identical tool call after it has already succeeded.\n            After the requested action is confirmed by tool results, stop using tools and give a concise final answer.\n'
+          )
+
+          text = text.replace('if (depth >= 24) {', 'if (depth >= MAX_TOOL_ROUNDS) {')
+
+          text = text.replace(
+              '        synchronized (DEEPSEEK_CONVERSATION) {\n            payload.add("input", DEEPSEEK_CONVERSATION.deepCopy());\n        }',
+              '        synchronized (DEEPSEEK_CONVERSATION) {\n            trimConversation(DEEPSEEK_CONVERSATION);\n            payload.add("input", DEEPSEEK_CONVERSATION.deepCopy());\n        }'
+          )
+
+          text = text.replace(
+              '        synchronized (OPENAI_CONVERSATION) {\n            for (JsonElement element : OPENAI_CONVERSATION) {',
+              '        synchronized (OPENAI_CONVERSATION) {\n            trimConversation(OPENAI_CONVERSATION);\n            for (JsonElement element : OPENAI_CONVERSATION) {'
+          )
+
+          text = text.replace(
+              '        payload.add("tools", openAiToolsArray());\n        payload.addProperty("tool_choice", "auto");\n        return payload;',
+              '        payload.add("tools", openAiToolsArray());\n        payload.addProperty("tool_choice", "auto");\n        payload.addProperty("max_tokens", 1024);\n        return payload;'
+          )
+
+          text = text.replace(
+              '            JsonArray toolCalls = assistant.has("tool_calls") && assistant.get("tool_calls").isJsonArray()\n',
+              '            JsonArray toolCalls = assistant.has("tool_calls") && assistant.get("tool_calls").isJsonArray()\n'
+          )
+
+          switch_old = '''            case "scan_area" -> scanArea(server, args);\n            case "place_blocks" -> placeBlocks(server, args);\n            case "break_block" -> breakBlock(server, args);'''
+          switch_new = '''            case "scan_area" -> scanArea(server, args);\n            case "place_blocks" -> placeBlocks(server, args);\n            case "fill_area" -> fillArea(server, args);\n            case "break_block" -> breakBlock(server, args);'''
+          if 'case "fill_area" -> fillArea(server, args);' not in text:
+              if switch_old not in text:
+                  raise SystemExit('tool switch marker not found')
+              text = text.replace(switch_old, switch_new, 1)
+
+          place_end = '''        JsonObject data = new JsonObject();\n        data.addProperty("requested", blocks.size());\n        data.addProperty("changed", changed);\n        return data;\n    }\n\n    private static JsonObject breakBlock'''
+          fill_method = '''        JsonObject data = new JsonObject();\n        data.addProperty("requested", blocks.size());\n        data.addProperty("changed", changed);\n        return data;\n    }\n\n    private static JsonObject fillArea(MinecraftServer server, JsonObject args) {\n        ServerWorld world = getWorld(server);\n\n        int x1 = requiredInt(args, "x1");\n        int y1 = requiredInt(args, "y1");\n        int z1 = requiredInt(args, "z1");\n        int x2 = requiredInt(args, "x2");\n        int y2 = requiredInt(args, "y2");\n        int z2 = requiredInt(args, "z2");\n\n        int minX = Math.min(x1, x2);\n        int minY = Math.min(y1, y2);\n        int minZ = Math.min(z1, z2);\n        int maxX = Math.max(x1, x2);\n        int maxY = Math.max(y1, y2);\n        int maxZ = Math.max(z1, z2);\n\n        long volume = (long) (maxX - minX + 1)\n                * (maxY - minY + 1)\n                * (maxZ - minZ + 1);\n        if (volume > 4096) {\n            throw new IllegalArgumentException("fill_area is limited to 4096 blocks per call");\n        }\n\n        Identifier id = Identifier.tryParse(string(args, "block", ""));\n        if (id == null || !Registries.BLOCK.containsId(id)) {\n            throw new IllegalArgumentException("Unknown block: " + string(args, "block", ""));\n        }\n\n        Block block = Registries.BLOCK.get(id);\n        int changed = 0;\n        for (int x = minX; x <= maxX; x++) {\n            for (int y = minY; y <= maxY; y++) {\n                for (int z = minZ; z <= maxZ; z++) {\n                    if (world.setBlockState(new BlockPos(x, y, z), block.getDefaultState())) {\n                        changed++;\n                    }\n                }\n            }\n        }\n\n        JsonObject data = new JsonObject();\n        data.addProperty("requested", volume);\n        data.addProperty("changed", changed);\n        data.addProperty("block", id.toString());\n        return data;\n    }\n\n    private static JsonObject breakBlock'''
+          if 'private static JsonObject fillArea(' not in text:
+              if place_end not in text:
+                  raise SystemExit('place_blocks insertion marker not found')
+              text = text.replace(place_end, fill_method, 1)
+
+          tool_def_old = '''        tools.add(function("place_blocks", "Place many blocks at exact overworld coordinates. Maximum 512 blocks per call.", objectProperties(\n                arrayProperty("blocks", "Block placements. Each entry contains x, y, z and a Minecraft block ID such as minecraft:oak_planks.")\n        )));\n        tools.add(function("break_block",'''
+          tool_def_new = '''        tools.add(function("place_blocks", "Place many blocks at exact overworld coordinates. Maximum 512 blocks per call.", objectProperties(\n                arrayProperty("blocks", "Block placements. Each entry contains x, y, z and a Minecraft block ID such as minecraft:oak_planks.")\n        )));\n        tools.add(function("fill_area", "Fill a rectangular cuboid region with one Minecraft block. Maximum 4096 blocks per call.", objectProperties(\n                intProperty("x1"), intProperty("y1"), intProperty("z1"),\n                intProperty("x2"), intProperty("y2"), intProperty("z2"),\n                property("block", "string", "Minecraft block ID such as minecraft:oak_planks.", true)\n        )));\n        tools.add(function("break_block",'''
+          if 'tools.add(function("fill_area"' not in text:
+              if tool_def_old not in text:
+                  raise SystemExit('tool definition marker not found')
+              text = text.replace(tool_def_old, tool_def_new, 1)
+
+          marker = '''    private static String string(JsonObject object, String name, String fallback) {'''
+          helper = '''    private static void trimConversation(JsonArray conversation) {\n        while (conversation.size() > MAX_CONVERSATION_ITEMS) {\n            conversation.remove(0);\n        }\n    }\n\n'''
+          if 'private static void trimConversation(JsonArray conversation)' not in text:
+              if marker not in text:
+                  raise SystemExit('helper marker not found')
+              text = text.replace(marker, helper + marker, 1)
+
+          if text == original:
+              print('No source changes needed.')
+          else:
+              path.write_text(text, encoding='utf-8')
+              print('Patched AiAgentService.java')
+          PY
+
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('gradle.properties')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace('mod_version=0.1.2', 'mod_version=0.1.3')
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Commit AI agent fixes
+        shell: bash
+        run: |
+          if git diff --quiet -- src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java gradle.properties; then
+            echo "No AI agent source changes needed."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java gradle.properties
+          git commit -m "Fix AI tool loop and building tools"
+          git push
 
       - name: Build
         run: ./gradlew build --no-daemon
