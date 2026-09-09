@@ -13,10 +13,12 @@ public final class MinecraftAiAgentClient implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
+        AiClientConfig.load();
+
         openPanelKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
                 "key.minecraft_ai_agent.open_panel",
                 InputUtil.Type.KEYSYM,
-                GLFW.GLFW_KEY_ENTER,
+                GLFW.GLFW_KEY_RIGHT_SHIFT,
                 "category.minecraft_ai_agent"
         ));
 
