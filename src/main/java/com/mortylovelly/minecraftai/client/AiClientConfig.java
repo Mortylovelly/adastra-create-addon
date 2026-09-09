@@ -14,8 +14,6 @@ public final class AiClientConfig {
             .getConfigDir()
             .resolve("minecraft_ai_agent.json");
 
-    public static final String BACKEND_URL = "http://127.0.0.1:8787";
-
     private static String apiKey = "";
 
     private AiClientConfig() {}
