@@ -24,7 +24,26 @@ jobs:
       - name: Grant Gradle permission
         run: chmod +x gradlew
 
-      - name: Add reliable AI network diagnostics
+      - name: Fix Gson compatibility
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace(
+              'DEEPSEEK_CONVERSATION.clear();',
+              'while (!DEEPSEEK_CONVERSATION.isEmpty()) DEEPSEEK_CONVERSATION.remove(DEEPSEEK_CONVERSATION.size() - 1);'
+          )
+          text = text.replace(
+              'GROQ_CONVERSATION.clear();',
+              'while (!GROQ_CONVERSATION.isEmpty()) GROQ_CONVERSATION.remove(GROQ_CONVERSATION.size() - 1);'
+          )
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Add AI network diagnostics
         shell: bash
         run: |
           python3 - <<'PY'
@@ -34,28 +53,23 @@ jobs:
           path = Path('src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java')
           text = path.read_text(encoding='utf-8')
 
-          # Normalize diagnostic imports without creating duplicates.
-          text = re.sub(r'import java\.net\.InetAddress;\n', '', text)
-          text = text.replace(
-              'import java.net.ConnectException;\n',
-              'import java.net.ConnectException;\n'
-              'import java.net.InetAddress;\n'
-              'import java.net.InetSocketAddress;\n'
-              'import java.net.Socket;\n'
+          # Remove duplicate diagnostic imports from previous attempts, then add them once.
+          text = re.sub(r'import java\\.net\\.InetAddress;\\n', '', text)
+          text = re.sub(r'import java\\.net\\.InetSocketAddress;\\n', '', text)
+          text = re.sub(r'import java\\.net\\.Socket;\\n', '', text)
+
+          marker_import = 'import java.net.ConnectException;\\n'
+          diagnostic_imports = (
+              'import java.net.ConnectException;\\n'
+              'import java.net.InetAddress;\\n'
+              'import java.net.InetSocketAddress;\\n'
+              'import java.net.Socket;\\n'
           )
-          text = re.sub(r'(import java\.net\.Socket;\n)(import java\.net\.Socket;\n)+', r'\1', text)
+          if marker_import not in text:
+              raise SystemExit('ConnectException import marker not found')
+          text = text.replace(marker_import, diagnostic_imports, 1)
 
-          # Add a diagnostic call immediately before every actual HTTP sendWithRetry.
-          call = '        logNetworkDiagnostics(request.uri(), providerName);\n'
-          send_line = '        return sendWithRetry(request, providerName, 0)'
-          text = text.replace(
-              send_line,
-              call + send_line,
-              1
-          ) if call not in text else text
-
-          # Add the helper once, immediately before deepSeekMessage.
-          marker = '    private static JsonObject deepSeekMessage(String content) {'
+          helper_marker = '    private static JsonObject deepSeekMessage(String content) {'
           helper = '''    private static void logNetworkDiagnostics(URI uri, String providerName) {
         String host = uri.getHost();
         System.out.println("[Minecraft AI Agent][" + providerName + "] NET DIAGNOSTICS START host=" + host + " port=443");
@@ -77,18 +91,14 @@ jobs:
                 try (Socket socket = new Socket()) {
                     socket.connect(new InetSocketAddress(address, 443), 5000);
                     long tcpMs = Duration.ofNanos(System.nanoTime() - tcpStarted).toMillis();
-                    System.out.println("[Minecraft AI Agent][" + providerName + "] TCP 443 OK "
-                            + address.getHostAddress() + " in " + tcpMs + " ms");
+                    System.out.println("[Minecraft AI Agent][" + providerName + "] TCP 443 OK " + address.getHostAddress() + " in " + tcpMs + " ms");
                 } catch (Exception exception) {
                     long tcpMs = Duration.ofNanos(System.nanoTime() - tcpStarted).toMillis();
-                    System.err.println("[Minecraft AI Agent][" + providerName + "] TCP 443 FAIL "
-                            + address.getHostAddress() + " after " + tcpMs + " ms: "
-                            + exception.getClass().getSimpleName() + " | " + exception.getMessage());
+                    System.err.println("[Minecraft AI Agent][" + providerName + "] TCP 443 FAIL " + address.getHostAddress() + " after " + tcpMs + " ms: " + exception.getClass().getSimpleName() + " | " + exception.getMessage());
                 }
             }
         } catch (Exception exception) {
-            System.err.println("[Minecraft AI Agent][" + providerName + "] DNS FAIL for " + host + ": "
-                    + exception.getClass().getSimpleName() + " | " + exception.getMessage());
+            System.err.println("[Minecraft AI Agent][" + providerName + "] DNS FAIL for " + host + ": " + exception.getClass().getSimpleName() + " | " + exception.getMessage());
         }
 
         System.out.println("[Minecraft AI Agent][" + providerName + "] NET DIAGNOSTICS END");
@@ -96,41 +106,37 @@ jobs:
 
 '''
           if 'private static void logNetworkDiagnostics(URI uri, String providerName)' not in text:
-              if marker not in text:
-                  raise SystemExit('Could not find deepSeekMessage marker')
-              text = text.replace(marker, helper + marker, 1)
+              if helper_marker not in text:
+                  raise SystemExit('deepSeekMessage marker not found')
+              text = text.replace(helper_marker, helper + helper_marker, 1)
+
+          # Make sure diagnostics run for the actual request before the first network attempt.
+          call = '        logNetworkDiagnostics(request.uri(), providerName);\\n'
+          send_line = '        return sendWithRetry(request, providerName, 0)'
+          if call not in text:
+              if send_line not in text:
+                  raise SystemExit('sendWithRetry call marker not found')
+              text = text.replace(send_line, call + send_line, 1)
 
           path.write_text(text, encoding='utf-8')
           PY
 
-      - name: Commit diagnostic source
+      - name: Commit source changes from CI
         shell: bash
         run: |
           if git diff --quiet -- src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java; then
-            echo "No diagnostic source changes needed."
+            echo "No CI source changes needed."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java
-          git commit -m "Add reliable AI network diagnostics"
+          git commit -m "Add AI network diagnostics"
           git push
 
       - name: Build
         shell: bash
-        run: |
-          set -o pipefail
-          for attempt in 1 2 3; do
-            echo "Build attempt $attempt/3"
-            if ./gradlew build --no-daemon; then
-              exit 0
-            fi
-            if [ "$attempt" -lt 3 ]; then
-              echo "Build failed; retrying after 15 seconds..."
-              sleep 15
-            fi
-          done
-          exit 1
+        run: ./gradlew build --no-daemon
 
       - name: Upload mod jar
         uses: actions/upload-artifact@v4
