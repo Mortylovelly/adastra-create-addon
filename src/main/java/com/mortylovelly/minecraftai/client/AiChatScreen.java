@@ -33,33 +33,35 @@ public final class AiChatScreen extends Screen {
     private boolean waiting;
 
     public AiChatScreen() {
-        super(Text.literal("Minecraft AI Agent"));
+        super(Text.literal("Minecraft AI"));
         messages.add("AI: Я готов. Напиши, что нужно сделать в мире.");
     }
 
     @Override
     protected void init() {
-        int panelWidth = Math.min(720, width - 40);
+        int panelWidth = Math.min(600, width - 40);
+        int panelHeight = Math.min(360, height - 40);
         int panelLeft = (width - panelWidth) / 2;
-        int inputY = height - 42;
+        int panelTop = (height - panelHeight) / 2;
+        int inputY = panelTop + panelHeight - 32;
 
         input = new TextFieldWidget(
                 textRenderer,
-                panelLeft,
+                panelLeft + 12,
                 inputY,
-                panelWidth - 92,
+                panelWidth - 104,
                 20,
                 Text.literal("Сообщение")
         );
         input.setMaxLength(2000);
-        input.setPlaceholder(Text.literal("Напиши команду для AI..."));
+        input.setPlaceholder(Text.literal("Напиши, что сделать в мире..."));
         addDrawableChild(input);
 
         sendButton = addDrawableChild(ButtonWidget.builder(
                         Text.literal("Отправить"),
                         button -> sendMessage()
                 )
-                .dimensions(panelLeft + panelWidth - 86, inputY, 86, 20)
+                .dimensions(panelLeft + panelWidth - 84, inputY, 72, 20)
                 .build());
 
         setInitialFocus(input);
@@ -97,7 +99,9 @@ public final class AiChatScreen extends Screen {
             MinecraftClient client = MinecraftClient.getInstance();
             client.execute(() -> {
                 waiting = false;
-                sendButton.active = true;
+                if (sendButton != null) {
+                    sendButton.active = true;
+                }
 
                 if (throwable != null) {
                     messages.add("AI: Не удалось подключиться к backend. Запусти backend/start.bat.");
@@ -111,7 +115,9 @@ public final class AiChatScreen extends Screen {
 
                 try {
                     JsonObject root = JsonParser.parseString(response.body()).getAsJsonObject();
-                    String reply = root.has("reply") ? root.get("reply").getAsString() : "Пустой ответ от AI.";
+                    String reply = root.has("reply")
+                            ? root.get("reply").getAsString()
+                            : "Пустой ответ от AI.";
                     messages.add("AI: " + reply);
                 } catch (RuntimeException exception) {
                     messages.add("AI: Получен некорректный ответ от backend.");
@@ -142,34 +148,71 @@ public final class AiChatScreen extends Screen {
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        renderBackground(context, mouseX, mouseY, delta);
+        // Intentionally do not call Screen.renderBackground(): that method
+        // can blur the entire Minecraft scene behind the chat panel.
+        context.fill(0, 0, width, height, 0x65000000);
 
-        int panelWidth = Math.min(720, width - 40);
+        int panelWidth = Math.min(600, width - 40);
+        int panelHeight = Math.min(360, height - 40);
         int panelLeft = (width - panelWidth) / 2;
-        int panelTop = 28;
-        int panelBottom = height - 52;
+        int panelTop = (height - panelHeight) / 2;
+        int panelBottom = panelTop + panelHeight;
 
-        context.fill(panelLeft - 10, panelTop - 10, panelLeft + panelWidth + 10, panelBottom + 10, 0xE0101010);
-        context.drawTextWithShadow(textRenderer, title, panelLeft, panelTop, 0xFFFFFF);
+        context.fill(panelLeft, panelTop, panelLeft + panelWidth, panelBottom, 0xE5101010);
+        context.fill(panelLeft, panelTop, panelLeft + panelWidth, panelTop + 1, 0xFFFFFFFF);
 
-        int y = panelTop + 20;
-        int maxY = panelBottom - 8;
-        int start = Math.max(0, messages.size() - 12);
+        context.drawTextWithShadow(
+                textRenderer,
+                title,
+                panelLeft + 12,
+                panelTop + 10,
+                0xFFFFFF
+        );
 
-        for (int i = start; i < messages.size(); i++) {
-            String[] lines = wrap(messages.get(i), panelWidth - 8);
-            for (String line : lines) {
-                if (y > maxY) {
-                    break;
-                }
-                context.drawTextWithShadow(textRenderer, line, panelLeft, y, 0xE0E0E0);
-                y += 12;
+        int chatTop = panelTop + 32;
+        int chatBottom = panelBottom - 42;
+        int y = chatBottom - 4;
+        int maxWidth = panelWidth - 24;
+
+        List<String> renderedLines = new ArrayList<>();
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            String[] wrapped = wrap(messages.get(i), maxWidth);
+            for (int line = wrapped.length - 1; line >= 0; line--) {
+                renderedLines.add(0, wrapped[line]);
             }
-            y += 4;
+            renderedLines.add(0, "");
+
+            if (renderedLines.size() >= 24) {
+                break;
+            }
+        }
+
+        for (int i = renderedLines.size() - 1; i >= 0; i--) {
+            String line = renderedLines.get(i);
+            int lineHeight = line.isEmpty() ? 4 : 12;
+            y -= lineHeight;
+            if (y < chatTop) {
+                break;
+            }
+            if (!line.isEmpty()) {
+                context.drawTextWithShadow(
+                        textRenderer,
+                        line,
+                        panelLeft + 12,
+                        y,
+                        0xE8E8E8
+                );
+            }
         }
 
         if (waiting) {
-            context.drawTextWithShadow(textRenderer, "AI выполняет задачу...", panelLeft, panelBottom - 4, 0xA0FFA0);
+            context.drawTextWithShadow(
+                    textRenderer,
+                    "AI выполняет задачу...",
+                    panelLeft + 12,
+                    panelBottom - 48,
+                    0xA0FFA0
+            );
         }
 
         super.render(context, mouseX, mouseY, delta);
