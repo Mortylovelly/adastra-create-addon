@@ -28,10 +28,14 @@ import java.util.concurrent.CompletableFuture;
 
 public final class AiAgentService {
     private static final URI DEEPSEEK_URI = URI.create("https://api.deepseek.com/responses");
+    private static final URI GROQ_URI = URI.create("https://api.groq.com/openai/v1/chat/completions");
     private static final HttpClient HTTP = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .build();
-    private static final String MODEL = "deepseek-v4-flash";
+
+    private static final String DEEPSEEK_MODEL = "deepseek-v4-flash";
+    private static final String GROQ_MODEL = "openai/gpt-oss-20b";
+
     private static final String INSTRUCTIONS = """
             You are the AI agent inside a Minecraft 1.21.1 world.
             You can inspect and control the world only through the provided Minecraft tools.
@@ -45,51 +49,104 @@ public final class AiAgentService {
             """.strip();
 
     private static final List<JsonObject> TOOLS = createTools();
-    private static final JsonArray CONVERSATION = new JsonArray();
+    private static final JsonArray DEEPSEEK_CONVERSATION = new JsonArray();
+    private static final JsonArray GROQ_CONVERSATION = new JsonArray();
+    private static String historyProvider = "";
 
     private AiAgentService() {}
 
     public static CompletableFuture<String> chat(String message) {
+        String provider = AiClientConfig.getProvider();
         if (!AiClientConfig.hasApiKey()) {
-            return CompletableFuture.completedFuture("Сначала укажи DeepSeek API key в поле сверху.");
+            return CompletableFuture.completedFuture("Сначала укажи " + providerName(provider) + " API key в поле сверху.");
         }
 
-        JsonObject user = new JsonObject();
-        user.addProperty("type", "message");
-        user.addProperty("role", "user");
-        user.addProperty("content", message);
+        resetHistoryIfProviderChanged(provider);
 
-        synchronized (CONVERSATION) {
-            CONVERSATION.add(user);
+        if (provider.equals("groq")) {
+            synchronized (GROQ_CONVERSATION) {
+                GROQ_CONVERSATION.add(chatMessage("user", message));
+            }
+            return groqRequest(buildGroqPayload()).thenCompose(response -> processGroqResponse(response, 0));
         }
 
-        return request(buildPayload()).thenCompose(response -> processResponse(response, 0));
+        synchronized (DEEPSEEK_CONVERSATION) {
+            DEEPSEEK_CONVERSATION.add(deepSeekMessage(message));
+        }
+        return deepSeekRequest(buildDeepSeekPayload()).thenCompose(response -> processDeepSeekResponse(response, 0));
     }
 
     public static CompletableFuture<Boolean> testConnection() {
+        String provider = AiClientConfig.getProvider();
         if (!AiClientConfig.hasApiKey()) return CompletableFuture.completedFuture(false);
 
+        if (provider.equals("groq")) {
+            JsonObject payload = new JsonObject();
+            payload.addProperty("model", GROQ_MODEL);
+            JsonArray messages = new JsonArray();
+            messages.add(chatMessage("system", "Reply with exactly: OK"));
+            messages.add(chatMessage("user", "Connection test"));
+            payload.add("messages", messages);
+            payload.addProperty("temperature", 0);
+
+            return groqRequest(payload).thenApply(root -> {
+                JsonObject choice = firstChoice(root);
+                if (choice == null || !choice.has("message")) return false;
+                JsonObject assistant = choice.getAsJsonObject("message");
+                return assistant.has("content") && !assistant.get("content").isJsonNull()
+                        && !assistant.get("content").getAsString().isBlank();
+            });
+        }
+
         JsonObject payload = new JsonObject();
-        payload.addProperty("model", MODEL);
+        payload.addProperty("model", DEEPSEEK_MODEL);
         payload.addProperty("instructions", "Reply with exactly: OK");
         payload.addProperty("input", "Connection test");
-
-        return request(payload).thenApply(root ->
+        return deepSeekRequest(payload).thenApply(root ->
                 root.has("output_text") && !root.get("output_text").getAsString().isBlank());
     }
 
-    private static JsonObject buildPayload() {
-        JsonObject payload = new JsonObject();
-        payload.addProperty("model", MODEL);
-        payload.addProperty("instructions", INSTRUCTIONS);
-        synchronized (CONVERSATION) {
-            payload.add("input", CONVERSATION.deepCopy());
+    private static void resetHistoryIfProviderChanged(String provider) {
+        synchronized (DEEPSEEK_CONVERSATION) {
+            synchronized (GROQ_CONVERSATION) {
+                if (!provider.equals(historyProvider)) {
+                    DEEPSEEK_CONVERSATION.clear();
+                    GROQ_CONVERSATION.clear();
+                    historyProvider = provider;
+                }
+            }
         }
-        payload.add("tools", toolsArray());
+    }
+
+    private static JsonObject buildDeepSeekPayload() {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("model", DEEPSEEK_MODEL);
+        payload.addProperty("instructions", INSTRUCTIONS);
+        synchronized (DEEPSEEK_CONVERSATION) {
+            payload.add("input", DEEPSEEK_CONVERSATION.deepCopy());
+        }
+        payload.add("tools", deepSeekToolsArray());
+        payload.addProperty("tool_choice", "auto");
         return payload;
     }
 
-    private static CompletableFuture<String> processResponse(JsonObject response, int depth) {
+    private static JsonObject buildGroqPayload() {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("model", GROQ_MODEL);
+        JsonArray messages = new JsonArray();
+        messages.add(chatMessage("system", INSTRUCTIONS));
+        synchronized (GROQ_CONVERSATION) {
+            for (JsonElement element : GROQ_CONVERSATION) {
+                messages.add(element.deepCopy());
+            }
+        }
+        payload.add("messages", messages);
+        payload.add("tools", groqToolsArray());
+        payload.addProperty("tool_choice", "auto");
+        return payload;
+    }
+
+    private static CompletableFuture<String> processDeepSeekResponse(JsonObject response, int depth) {
         if (depth >= 24) {
             return CompletableFuture.completedFuture("ИИ достиг лимита действий для одной задачи.");
         }
@@ -99,9 +156,9 @@ public final class AiAgentService {
                 : new JsonArray();
 
         if (output.size() > 0) {
-            synchronized (CONVERSATION) {
+            synchronized (DEEPSEEK_CONVERSATION) {
                 for (JsonElement element : output) {
-                    CONVERSATION.add(element.deepCopy());
+                    DEEPSEEK_CONVERSATION.add(element.deepCopy());
                 }
             }
         }
@@ -128,19 +185,87 @@ public final class AiAgentService {
         }
 
         return sequence(futures).thenCompose(results -> {
-            synchronized (CONVERSATION) {
+            synchronized (DEEPSEEK_CONVERSATION) {
                 for (int i = 0; i < calls.size(); i++) {
                     JsonObject call = calls.get(i);
                     JsonObject result = new JsonObject();
                     result.addProperty("type", "function_call_output");
                     result.addProperty("call_id", string(call, "call_id", string(call, "id", "")));
                     result.addProperty("output", results.get(i).toString());
-                    CONVERSATION.add(result);
+                    DEEPSEEK_CONVERSATION.add(result);
+                }
+            }
+            return deepSeekRequest(buildDeepSeekPayload())
+                    .thenCompose(next -> processDeepSeekResponse(next, depth + 1));
+        });
+    }
+
+    private static CompletableFuture<String> processGroqResponse(JsonObject response, int depth) {
+        if (depth >= 24) {
+            return CompletableFuture.completedFuture("ИИ достиг лимита действий для одной задачи.");
+        }
+
+        JsonObject choice = firstChoice(response);
+        if (choice == null || !choice.has("message")) {
+            return CompletableFuture.completedFuture("Groq не вернул ожидаемый ответ.");
+        }
+
+        JsonObject assistant = choice.getAsJsonObject("message");
+        JsonArray toolCalls = assistant.has("tool_calls") && assistant.get("tool_calls").isJsonArray()
+                ? assistant.getAsJsonArray("tool_calls")
+                : new JsonArray();
+
+        synchronized (GROQ_CONVERSATION) {
+            GROQ_CONVERSATION.add(assistant.deepCopy());
+        }
+
+        if (toolCalls.isEmpty()) {
+            String text = assistant.has("content") && !assistant.get("content").isJsonNull()
+                    ? assistant.get("content").getAsString()
+                    : "Groq не вернул текстовый ответ.";
+            return CompletableFuture.completedFuture(text);
+        }
+
+        List<CompletableFuture<JsonObject>> futures = new ArrayList<>();
+        List<JsonObject> validCalls = new ArrayList<>();
+        for (JsonElement element : toolCalls) {
+            if (!element.isJsonObject()) continue;
+            validCalls.add(element.getAsJsonObject());
+            futures.add(executeGroqToolAsync(element.getAsJsonObject()));
+        }
+
+        return sequence(futures).thenCompose(results -> {
+            synchronized (GROQ_CONVERSATION) {
+                for (int i = 0; i < validCalls.size(); i++) {
+                    JsonObject call = validCalls.get(i);
+                    JsonObject result = new JsonObject();
+                    result.addProperty("role", "tool");
+                    result.addProperty("tool_call_id", string(call, "id", ""));
+                    result.addProperty("content", results.get(i).toString());
+                    GROQ_CONVERSATION.add(result);
                 }
             }
 
-            return request(buildPayload()).thenCompose(next -> processResponse(next, depth + 1));
+            return groqRequest(buildGroqPayload())
+                    .thenCompose(next -> processGroqResponse(next, depth + 1));
         });
+    }
+
+    private static CompletableFuture<JsonObject> executeGroqToolAsync(JsonObject call) {
+        JsonObject function = call.has("function") && call.get("function").isJsonObject()
+                ? call.getAsJsonObject("function")
+                : call;
+        String name = string(function, "name", "");
+        JsonObject arguments;
+        try {
+            arguments = JsonParser.parseString(string(function, "arguments", "{}")).getAsJsonObject();
+        } catch (RuntimeException exception) {
+            JsonObject error = new JsonObject();
+            error.addProperty("ok", false);
+            error.addProperty("error", "Invalid tool arguments: " + exception.getMessage());
+            return CompletableFuture.completedFuture(error);
+        }
+        return executeToolAsync(name, arguments);
     }
 
     private static CompletableFuture<JsonObject> executeToolAsync(JsonObject call) {
@@ -159,7 +284,10 @@ public final class AiAgentService {
             error.addProperty("error", "Invalid tool arguments: " + exception.getMessage());
             return CompletableFuture.completedFuture(error);
         }
+        return executeToolAsync(name, arguments);
+    }
 
+    private static CompletableFuture<JsonObject> executeToolAsync(String name, JsonObject arguments) {
         MinecraftClient client = MinecraftClient.getInstance();
         MinecraftServer server = client.getServer();
         if (server == null) {
@@ -322,9 +450,20 @@ public final class AiAgentService {
         return server.getOverworld();
     }
 
-    private static JsonArray toolsArray() {
+    private static JsonArray deepSeekToolsArray() {
         JsonArray array = new JsonArray();
         for (JsonObject tool : TOOLS) array.add(tool.deepCopy());
+        return array;
+    }
+
+    private static JsonArray groqToolsArray() {
+        JsonArray array = new JsonArray();
+        for (JsonObject tool : TOOLS) {
+            JsonObject wrapper = new JsonObject();
+            wrapper.addProperty("type", "function");
+            wrapper.add("function", tool.deepCopy());
+            array.add(wrapper);
+        }
         return array;
     }
 
@@ -426,13 +565,26 @@ public final class AiAgentService {
                 property("item", "string", "Minecraft item ID such as minecraft:diamond_sword.", true),
                 property("count", "integer", "Amount from 1 to 64. Defaults to 1.", false)
         )));
-        return tools;
+        List<JsonObject> flatFunctions = new ArrayList<>();
+        for (JsonObject tool : tools) {
+            JsonObject flat = tool.getAsJsonObject();
+            flatFunctions.add(flat);
+        }
+        return flatFunctions;
     }
 
-    private static CompletableFuture<JsonObject> request(JsonObject payload) {
-        HttpRequest request = HttpRequest.newBuilder(DEEPSEEK_URI)
+    private static CompletableFuture<JsonObject> deepSeekRequest(JsonObject payload) {
+        return request(DEEPSEEK_URI, AiClientConfig.getDeepSeekApiKey(), payload, "DeepSeek");
+    }
+
+    private static CompletableFuture<JsonObject> groqRequest(JsonObject payload) {
+        return request(GROQ_URI, AiClientConfig.getGroqApiKey(), payload, "Groq");
+    }
+
+    private static CompletableFuture<JsonObject> request(URI uri, String apiKey, JsonObject payload, String providerName) {
+        HttpRequest request = HttpRequest.newBuilder(uri)
                 .timeout(Duration.ofSeconds(120))
-                .header("Authorization", "Bearer " + AiClientConfig.getApiKey())
+                .header("Authorization", "Bearer " + apiKey)
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(payload.toString(), StandardCharsets.UTF_8))
                 .build();
@@ -445,14 +597,40 @@ public final class AiAgentService {
                             return CompletableFuture.completedFuture(body);
                         }
                         return CompletableFuture.failedFuture(new IOException(
-                                "DeepSeek API " + response.statusCode() + ": " + extractError(body)
+                                providerName + " API " + response.statusCode() + ": " + extractError(body)
                         ));
                     } catch (RuntimeException exception) {
                         return CompletableFuture.failedFuture(new IOException(
-                                "Неверный ответ DeepSeek API: " + exception.getMessage()
+                                "Неверный ответ " + providerName + " API: " + exception.getMessage()
                         ));
                     }
                 });
+    }
+
+    private static JsonObject deepSeekMessage(String content) {
+        JsonObject message = new JsonObject();
+        message.addProperty("type", "message");
+        message.addProperty("role", "user");
+        message.addProperty("content", content);
+        return message;
+    }
+
+    private static JsonObject chatMessage(String role, String content) {
+        JsonObject message = new JsonObject();
+        message.addProperty("role", role);
+        message.addProperty("content", content);
+        return message;
+    }
+
+    private static JsonObject firstChoice(JsonObject root) {
+        if (!root.has("choices") || !root.get("choices").isJsonArray()) return null;
+        JsonArray choices = root.getAsJsonArray("choices");
+        if (choices.isEmpty() || !choices.get(0).isJsonObject()) return null;
+        return choices.get(0).getAsJsonObject();
+    }
+
+    private static String providerName(String provider) {
+        return provider.equals("groq") ? "Groq" : "DeepSeek";
     }
 
     private static String extractError(JsonObject body) {
