@@ -1,0 +1,82 @@
+name: Final Fix Command Tool
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix-and-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: temurin
+
+      - name: Fix source safely and build
+        shell: bash
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          for attempt in 1 2 3 4 5 6 7 8; do
+            git fetch origin main
+            git reset --hard origin/main
+
+            python3 - <<'PY'
+            from pathlib import Path
+            path = Path('src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java')
+            text = path.read_text(encoding='utf-8')
+            old = '            int result = server.getCommandManager().executeWithPrefix(server.getCommandSource(), command);'
+            new = '            server.getCommandManager().executeWithPrefix(server.getCommandSource(), command);'
+            changed = old in text
+            text = text.replace(old, new, 1)
+            text = text.replace('            data.addProperty("result", result);\n', '', 1)
+            path.write_text(text, encoding='utf-8')
+            print('Broken command assignment found:', changed)
+            PY
+
+            if git diff --quiet -- src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java; then
+              echo "Command tool already fixed on current main."
+              break
+            fi
+
+            git add src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java
+            git commit -m "Fix command tool compilation"
+
+            if git push origin HEAD:main; then
+              echo "Command tool fix pushed successfully."
+              break
+            fi
+
+            echo "Remote changed during push; retrying from latest main."
+            if [ "$attempt" = "8" ]; then
+              exit 1
+            fi
+          done
+
+          if grep -q 'int result = server.getCommandManager().executeWithPrefix' src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java; then
+            echo "The broken command assignment is still present."
+            exit 1
+          fi
+
+          chmod +x gradlew
+          ./gradlew build --no-daemon
+
+      - name: Upload mod jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: minecraft-ai-agent-final-fix
+          path: build/libs/*.jar
