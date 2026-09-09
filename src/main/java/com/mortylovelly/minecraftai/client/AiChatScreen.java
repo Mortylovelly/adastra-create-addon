@@ -18,6 +18,7 @@ public final class AiChatScreen extends Screen {
     private ButtonWidget sendButton;
     private ButtonWidget deepSeekButton;
     private ButtonWidget groqButton;
+    private ButtonWidget openRouterButton;
     private boolean waiting;
     private int panelLeft;
     private int panelTop;
@@ -64,6 +65,11 @@ public final class AiChatScreen extends Screen {
                 .dimensions(panelLeft + 128, providerY, 108, 20)
                 .build());
 
+        openRouterButton = addDrawableChild(ButtonWidget.builder(
+                        Text.literal("OpenRouter"), button -> selectProvider("openrouter"))
+                .dimensions(panelLeft + 242, providerY, 108, 20)
+                .build());
+
         refreshProviderButtons();
 
         int inputY = panelTop + panelHeight - 34;
@@ -99,6 +105,7 @@ public final class AiChatScreen extends Screen {
         String provider = AiClientConfig.getProvider();
         if (deepSeekButton != null) deepSeekButton.active = !provider.equals("deepseek");
         if (groqButton != null) groqButton.active = !provider.equals("groq");
+        if (openRouterButton != null) openRouterButton.active = !provider.equals("openrouter");
     }
 
     private void saveApiKeySilently() {
@@ -176,7 +183,11 @@ public final class AiChatScreen extends Screen {
     }
 
     private String providerDisplayName() {
-        return AiClientConfig.getProvider().equals("groq") ? "Groq" : "DeepSeek";
+        return switch (AiClientConfig.getProvider()) {
+            case "groq" -> "Groq";
+            case "openrouter" -> "OpenRouter";
+            default -> "DeepSeek";
+        };
     }
 
     @Override
@@ -199,7 +210,7 @@ public final class AiChatScreen extends Screen {
                 waiting ? 0xA0FFA0 : 0xB0B0B8
         );
         context.drawTextWithShadow(textRenderer,
-                "Провайдер:", panelLeft + 248, panelTop + 62, 0xC0C0C8);
+                "Провайдер:", panelLeft + 364, panelTop + 62, 0xC0C0C8);
 
         int chatTop = panelTop + 112;
         int chatBottom = panelTop + panelHeight - 46;
