@@ -50,11 +50,11 @@ public final class AiAgentService {
             .build();
 
     private static final int NETWORK_RETRIES = 2;
-    private static final int MAX_TOOL_ROUNDS = 6;
-    private static final int MAX_TOOL_CALLS = 12;
-    private static final int API_HISTORY_MESSAGES = 8;
-    private static final int API_HISTORY_CHARS = 6000;
-    private static final int MAX_TOOL_RESULT_CHARS = 1800;
+    private static final int MAX_TOOL_ROUNDS = 4;
+    private static final int MAX_TOOL_CALLS = 8;
+    private static final int API_HISTORY_MESSAGES = 6;
+    private static final int API_HISTORY_CHARS = 3500;
+    private static final int MAX_TOOL_RESULT_CHARS = 1200;
     private static final int MAX_PLACE_BLOCKS = 128;
     private static final int MAX_FILL_VOLUME = 4096;
     private static final int MAX_SCAN_RADIUS = 6;
@@ -65,53 +65,18 @@ public final class AiAgentService {
 
     private static final String INSTRUCTIONS = """
             You are the AI agent inside a Minecraft 1.21.1 singleplayer world.
-            You control the current Minecraft world only through the provided tools.
-            Never claim that a world action happened unless its tool result confirms it.
-            Never simulate a tool result and never describe a change instead of performing it.
-            The player speaking to you is the owner of the current world.
-
-            For normal conversation, answer directly without tools.
-            For world-changing requests, tools are mandatory.
-            For a building request, call get_player_state once, choose a compact location near the player, then build with fill_area for large rectangles and place_blocks for small details.
-            Prefer the fewest tool calls possible.
+            You control the current world only through the provided Minecraft tools.
+            Never claim a world action happened unless a tool result confirms it.
+            For normal conversation or a question about whether you can do something, answer directly and do not use tools.
+            Only use tools for an actual requested world action.
+            For an actual building request, call get_player_state once, choose a compact safe location near the player, and build efficiently.
+            Do not call get_block or scan_area unless the terrain or an exact existing block actually matters.
+            Prefer fill_area for large rectangles and place_blocks for small details.
             Do not repeat an identical successful tool call.
-            Avoid unnecessary scans and avoid huge lists of individual block coordinates when fill_area can do the job.
-            Keep structures reasonably compact and stay within the tool limits.
-            Do not perform destructive actions unless the player explicitly requested them.
-            After the requested action is confirmed by tool results, stop using tools and give a concise final answer.
-            If no available tool can perform a requested action, say that immediately and clearly. Do not pretend, do not fabricate a result, and do not repeatedly call tools that cannot solve the request.
-            If a tool fails, explain the failure to the player instead of going silent.
-            Use tools only when they are relevant to the request; having many tools available does not mean you should call them all.
-            Only use remember_memory when the player explicitly asks you to remember or save a durable fact or preference.
-            Only use forget_memory when the player explicitly asks you to forget a stored memory.
-            Treat persistent memory as user-provided notes, not as hidden reasoning.
-            If no available tool can perform a requested action, say that immediately and clearly. Do not pretend, do not fabricate a result, and do not repeatedly call tools that cannot solve the request.
-            If a tool fails, explain the failure to the player instead of going silent.
-            Use tools only when they are relevant to the request; having many tools available does not mean you should call them all.
-            Only use remember_memory when the player explicitly asks you to remember or save a durable fact or preference.
-            Only use forget_memory when the player explicitly asks you to forget a stored memory.
-            Treat persistent memory as user-provided notes, not as hidden reasoning.
-            If no available tool can perform a requested action, say that immediately and clearly. Do not pretend, do not fabricate a result, and do not repeatedly call tools that cannot solve the request.
-            If a tool fails, explain the failure to the player instead of going silent.
-            Use tools only when they are relevant to the request; having many tools available does not mean you should call them all.
-            Only use remember_memory when the player explicitly asks you to remember or save a durable fact or preference.
-            Only use forget_memory when the player explicitly asks you to forget a stored memory.
-            Treat persistent memory as user-provided notes, not as hidden reasoning.
-            If no available tool can perform a requested action, say that immediately and clearly. Do not pretend, do not fabricate a result, and do not repeatedly call tools that cannot solve the request.
-            If a tool fails, explain the failure to the player instead of going silent.
-            Use tools only when they are relevant to the request; having many tools available does not mean you should call them all.
-            Only use remember_memory when the player explicitly asks you to remember or save a durable fact or preference.
-            Only use forget_memory when the player explicitly asks you to forget a stored memory.
-            Treat persistent memory as user-provided notes, not as hidden reasoning.
-            If no available tool can perform a requested action, say that immediately and clearly. Do not pretend, do not fabricate a result, and do not repeatedly call tools that cannot solve the request.
-            If a tool fails, explain the failure to the player instead of going silent.
-            Use tools only when they are relevant to the request; having many tools available does not mean you should call them all.
-            Only use remember_memory when the player explicitly asks you to remember or save a durable fact or preference.
-            Only use forget_memory when the player explicitly asks you to forget a stored memory.
-            Treat persistent memory as user-provided notes, not as hidden reasoning.
-            Only use remember_memory when the player explicitly asks you to remember or save a durable preference/fact.
-            Only use forget_memory when the player explicitly asks you to forget a stored memory.
-            Treat persistent memory as user-provided notes, not as hidden reasoning.
+            Do not perform destructive actions unless explicitly requested.
+            Only use remember_memory or forget_memory when the player explicitly requests memory changes.
+            If a tool fails, tell the player clearly instead of pretending it worked.
+            After the requested action is confirmed, stop using tools and give a concise final answer.
             """.strip();
 
     private AiAgentService() {}
@@ -122,16 +87,8 @@ public final class AiAgentService {
             return CompletableFuture.completedFuture("Сначала укажи " + providerName(provider) + " API key в поле сверху.");
         }
 
-        AiAgentStatus.set("Анализирую запрос");
-        AiAgentStatus.set("Анализирую запрос");
-        AiAgentStatus.set("Анализирую запрос");
-        AiAgentStatus.set("Анализирую запрос");
-        AiAgentStatus.set("Анализирую запрос");
-        AiAgentLog.info("TASK START provider=" + providerName(provider) + " chars=" + message.length());
-        AiAgentLog.info("TASK START provider=" + providerName(provider) + " chars=" + message.length());
-        AiAgentLog.info("TASK START provider=" + providerName(provider) + " chars=" + message.length());
-        AiAgentLog.info("TASK START provider=" + providerName(provider) + " chars=" + message.length());
-        AiAgentLog.info("TASK START provider=" + providerName(provider) + " chars=" + message.length());
+        AiAgentStatus.set("Анализирую запрос");        AiAgentStatus.set("Анализирую запрос");        AiAgentStatus.set("Анализирую запрос");        AiAgentStatus.set("Анализирую запрос");        AiAgentStatus.set("Анализирую запрос");
+        AiAgentLog.info("TASK START provider=" + providerName(provider) + " chars=" + message.length());        AiAgentLog.info("TASK START provider=" + providerName(provider) + " chars=" + message.length());        AiAgentLog.info("TASK START provider=" + providerName(provider) + " chars=" + message.length());        AiAgentLog.info("TASK START provider=" + providerName(provider) + " chars=" + message.length());        AiAgentLog.info("TASK START provider=" + providerName(provider) + " chars=" + message.length());
         System.out.println("[Minecraft AI Agent][" + providerName(provider) + "] TASK START chars=" + message.length());
 
         if (provider.equals("deepseek")) {
@@ -150,11 +107,7 @@ public final class AiAgentService {
             payload.addProperty("instructions", "Reply with exactly: OK");
             payload.addProperty("input", "Connection test");
             payload.addProperty("max_output_tokens", 32);
-            AiAgentStatus.set("Проверяю подключение к DeepSeek");
-        AiAgentStatus.set("Проверяю подключение к DeepSeek");
-        AiAgentStatus.set("Проверяю подключение к DeepSeek");
-        AiAgentStatus.set("Проверяю подключение к DeepSeek");
-        AiAgentStatus.set("Проверяю подключение к DeepSeek");
+            AiAgentStatus.set("Проверяю подключение к DeepSeek");        AiAgentStatus.set("Проверяю подключение к DeepSeek");        AiAgentStatus.set("Проверяю подключение к DeepSeek");        AiAgentStatus.set("Проверяю подключение к DeepSeek");        AiAgentStatus.set("Проверяю подключение к DeepSeek");
         return request(DEEPSEEK_URI, AiClientConfig.getDeepSeekApiKey(), payload, "DeepSeek")
                     .thenApply(root -> root.has("output_text")
                             && !root.get("output_text").isJsonNull()
@@ -170,11 +123,7 @@ public final class AiAgentService {
         payload.addProperty("temperature", 0);
         payload.addProperty("max_tokens", 32);
 
-        AiAgentStatus.set("Проверяю подключение к " + providerName(provider));
-        AiAgentStatus.set("Проверяю подключение к " + providerName(provider));
-        AiAgentStatus.set("Проверяю подключение к " + providerName(provider));
-        AiAgentStatus.set("Проверяю подключение к " + providerName(provider));
-        AiAgentStatus.set("Проверяю подключение к " + providerName(provider));
+        AiAgentStatus.set("Проверяю подключение к " + providerName(provider));        AiAgentStatus.set("Проверяю подключение к " + providerName(provider));        AiAgentStatus.set("Проверяю подключение к " + providerName(provider));        AiAgentStatus.set("Проверяю подключение к " + providerName(provider));        AiAgentStatus.set("Проверяю подключение к " + providerName(provider));
         return request(uriForProvider(provider), keyForProvider(provider), payload, providerName(provider))
                 .thenApply(root -> {
                     JsonObject choice = firstChoice(root);
@@ -222,11 +171,7 @@ public final class AiAgentService {
             payload.add("messages", array);
         }
 
-        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
-        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
-        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
-        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
-        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
+        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
         return request(uriForProvider(provider), keyForProvider(provider), payload, providerName(provider))
                 .thenCompose(response -> {
                     JsonObject choice = firstChoice(response);
@@ -246,9 +191,7 @@ public final class AiAgentService {
                         String text = assistant.has("content") && !assistant.get("content").isJsonNull()
                                 ? assistant.get("content").getAsString()
                                 : "Ответ без текста.";
-                        AiAgentStatus.clear();
-                        AiAgentStatus.clear();
-                        AiAgentStatus.clear();
+                        AiAgentStatus.clear();                        AiAgentStatus.clear();                        AiAgentStatus.clear();
                         AiAgentLog.info("TASK END provider=" + providerName(provider) + " rounds=" + round + " toolCalls=" + totalCalls);
                         System.out.println("[Minecraft AI Agent][" + providerName(provider) + "] TASK END rounds=" + round + " toolCalls=" + totalCalls);
                         return CompletableFuture.completedFuture(text);
@@ -281,7 +224,7 @@ public final class AiAgentService {
                             messages.add(resultMessage);
 
                             System.out.println("[Minecraft AI Agent][" + providerName(provider) + "] TOOL RESULT name="
-                                    + toolName + " ok=" + toolResult.has("ok") + "");
+                                    + toolName + " ok=" + (!toolResult.has("ok") || toolResult.get("ok").getAsBoolean()) + "");
                         }
 
                         if (round + 1 >= MAX_TOOL_ROUNDS || totalCalls + validCalls.size() >= MAX_TOOL_CALLS) {
@@ -346,11 +289,7 @@ public final class AiAgentService {
             payload.add("input", inputArray);
         }
 
-        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
-        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
-        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
-        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
-        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
+        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
         return request(DEEPSEEK_URI, AiClientConfig.getDeepSeekApiKey(), payload, "DeepSeek")
                 .thenCompose(response -> {
                     JsonArray output = response.has("output") && response.get("output").isJsonArray()
@@ -373,9 +312,7 @@ public final class AiAgentService {
                         String text = response.has("output_text") && !response.get("output_text").isJsonNull()
                                 ? response.get("output_text").getAsString()
                                 : "DeepSeek не вернул текстовый ответ.";
-                        AiAgentStatus.clear();
-                        AiAgentStatus.clear();
-                        AiAgentStatus.clear();
+                        AiAgentStatus.clear();                        AiAgentStatus.clear();                        AiAgentStatus.clear();
                         AiAgentLog.info("TASK END provider=DeepSeek rounds=" + round + " toolCalls=" + totalCalls);
                         System.out.println("[Minecraft AI Agent][DeepSeek] TASK END rounds=" + round + " toolCalls=" + totalCalls);
                         return CompletableFuture.completedFuture(text);
@@ -427,16 +364,8 @@ public final class AiAgentService {
             return CompletableFuture.completedFuture(cached.deepCopy());
         }
 
-        AiAgentStatus.set(statusForTool(name));
-        AiAgentStatus.set(statusForTool(name));
-        AiAgentStatus.set(statusForTool(name));
-        AiAgentStatus.set(statusForTool(name));
-        AiAgentStatus.set(statusForTool(name));
-        AiAgentLog.info("TOOL CALL name=" + name + " args=" + compactJson(arguments, 700));
-        AiAgentLog.info("TOOL CALL name=" + name + " args=" + compactJson(arguments, 700));
-        AiAgentLog.info("TOOL CALL name=" + name + " args=" + compactJson(arguments, 700));
-        AiAgentLog.info("TOOL CALL name=" + name + " args=" + compactJson(arguments, 700));
-        AiAgentLog.info("TOOL CALL name=" + name + " args=" + compactJson(arguments, 700));
+        AiAgentStatus.set(statusForTool(name));        AiAgentStatus.set(statusForTool(name));        AiAgentStatus.set(statusForTool(name));        AiAgentStatus.set(statusForTool(name));        AiAgentStatus.set(statusForTool(name));
+        AiAgentLog.info("TOOL CALL name=" + name + " args=" + compactJson(arguments, 700));        AiAgentLog.info("TOOL CALL name=" + name + " args=" + compactJson(arguments, 700));        AiAgentLog.info("TOOL CALL name=" + name + " args=" + compactJson(arguments, 700));        AiAgentLog.info("TOOL CALL name=" + name + " args=" + compactJson(arguments, 700));        AiAgentLog.info("TOOL CALL name=" + name + " args=" + compactJson(arguments, 700));
         System.out.println("[Minecraft AI Agent] TOOL CALL name=" + name + " args=" + compactJson(arguments, 700));
 
         MinecraftClient client = MinecraftClient.getInstance();
@@ -455,11 +384,7 @@ public final class AiAgentService {
                 JsonObject error = new JsonObject();
                 error.addProperty("ok", false);
                 error.addProperty("error", exception.getMessage() == null ? exception.toString() : exception.getMessage());
-                AiAgentLog.error("TOOL ERROR name=" + name + " message=" + error.get("error").getAsString());
-                AiAgentLog.error("TOOL ERROR name=" + name + " message=" + error.get("error").getAsString());
-                AiAgentLog.error("TOOL ERROR name=" + name + " message=" + error.get("error").getAsString());
-                AiAgentLog.error("TOOL ERROR name=" + name + " message=" + error.get("error").getAsString());
-                AiAgentLog.error("TOOL ERROR name=" + name + " message=" + error.get("error").getAsString());
+                AiAgentLog.error("TOOL ERROR name=" + name + " message=" + error.get("error").getAsString());                AiAgentLog.error("TOOL ERROR name=" + name + " message=" + error.get("error").getAsString());                AiAgentLog.error("TOOL ERROR name=" + name + " message=" + error.get("error").getAsString());                AiAgentLog.error("TOOL ERROR name=" + name + " message=" + error.get("error").getAsString());                AiAgentLog.error("TOOL ERROR name=" + name + " message=" + error.get("error").getAsString());
                 future.complete(error);
             }
         });
@@ -906,6 +831,16 @@ public final class AiAgentService {
                         }
                     }
 
+                    if (response.statusCode() == 429
+                            && "OpenRouter".equals(providerName)
+                            && payload.has("model")
+                            && OPENROUTER_MODEL.equals(payload.get("model").getAsString())) {
+                        JsonObject fallbackPayload = payload.deepCopy();
+                        fallbackPayload.addProperty("model", "openrouter/free");
+                        System.out.println("[Minecraft AI Agent][OpenRouter] Gemma free endpoint is rate-limited; trying openrouter/free");
+                        return request(OPENROUTER_URI, apiKey, fallbackPayload, "OpenRouter");
+                    }
+
                     String errorText;
                     try {
                         errorText = extractError(JsonParser.parseString(body).getAsJsonObject());
@@ -913,11 +848,7 @@ public final class AiAgentService {
                         errorText = truncate(body, 900);
                     }
 
-                    AiAgentLog.error("API ERROR provider=" + providerName + " status=" + response.statusCode() + " message=" + truncate(errorText, 500));
-                    AiAgentLog.error("API ERROR provider=" + providerName + " status=" + response.statusCode() + " message=" + truncate(errorText, 500));
-                    AiAgentLog.error("API ERROR provider=" + providerName + " status=" + response.statusCode() + " message=" + truncate(errorText, 500));
-                    AiAgentLog.error("API ERROR provider=" + providerName + " status=" + response.statusCode() + " message=" + truncate(errorText, 500));
-                    AiAgentLog.error("API ERROR provider=" + providerName + " status=" + response.statusCode() + " message=" + truncate(errorText, 500));
+                    AiAgentLog.error("API ERROR provider=" + providerName + " status=" + response.statusCode() + " message=" + truncate(errorText, 500));                    AiAgentLog.error("API ERROR provider=" + providerName + " status=" + response.statusCode() + " message=" + truncate(errorText, 500));                    AiAgentLog.error("API ERROR provider=" + providerName + " status=" + response.statusCode() + " message=" + truncate(errorText, 500));                    AiAgentLog.error("API ERROR provider=" + providerName + " status=" + response.statusCode() + " message=" + truncate(errorText, 500));                    AiAgentLog.error("API ERROR provider=" + providerName + " status=" + response.statusCode() + " message=" + truncate(errorText, 500));
                     return CompletableFuture.failedFuture(new IOException(
                             providerName + " API " + response.statusCode() + ": " + errorText));
                 });
@@ -930,31 +861,34 @@ public final class AiAgentService {
                 + (attempt + 1) + "/" + (NETWORK_RETRIES + 1));
 
         return HTTP.sendAsync(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
-                .handle((response, throwable) -> {
+                .thenCompose(response -> {
                     long elapsed = Duration.ofNanos(System.nanoTime() - started).toMillis();
-                    if (throwable == null) {
-                        System.out.println("[Minecraft AI Agent][" + providerName + "] HTTP RESPONSE status="
-                                + response.statusCode() + " in=" + elapsed + " ms");
-                        if (response.statusCode() == 429) {
-                            String retryAfter = response.headers().firstValue("retry-after").orElse("unknown");
-                            System.err.println("[Minecraft AI Agent][" + providerName + "] RATE LIMIT retry-after=" + retryAfter);
-                        }
-                        return CompletableFuture.completedFuture(response);
-                    }
+                    System.out.println("[Minecraft AI Agent][" + providerName + "] HTTP RESPONSE status="
+                            + response.statusCode() + " in=" + elapsed + " ms");
 
+                    if (response.statusCode() == 429 && attempt < NETWORK_RETRIES) {
+                        String retryAfter = response.headers().firstValue("retry-after").orElse("");
+                        long delay = parseRetryAfterSeconds(retryAfter, attempt);
+                        System.err.println("[Minecraft AI Agent][" + providerName + "] RATE LIMIT retry-after="
+                                + (retryAfter.isBlank() ? "unknown" : retryAfter));
+                        System.out.println("[Minecraft AI Agent][" + providerName + "] RETRY after " + delay + " s");
+                        return CompletableFuture.supplyAsync(
+                                () -> null,
+                                CompletableFuture.delayedExecutor(delay, TimeUnit.SECONDS))
+                                .thenCompose(ignored -> sendWithRetry(request, providerName, attempt + 1));
+                    }
+                    return CompletableFuture.completedFuture(response);
+                })
+                .exceptionallyCompose(throwable -> {
                     Throwable cause = rootCause(throwable);
-                    AiAgentLog.error("HTTP FAIL provider=" + providerName + " type=" + cause.getClass().getSimpleName() + " message=" + String.valueOf(cause.getMessage()));
-                    AiAgentLog.error("HTTP FAIL provider=" + providerName + " type=" + cause.getClass().getSimpleName() + " message=" + String.valueOf(cause.getMessage()));
-                    AiAgentLog.error("HTTP FAIL provider=" + providerName + " type=" + cause.getClass().getSimpleName() + " message=" + String.valueOf(cause.getMessage()));
-                    AiAgentLog.error("HTTP FAIL provider=" + providerName + " type=" + cause.getClass().getSimpleName() + " message=" + String.valueOf(cause.getMessage()));
-                    AiAgentLog.error("HTTP FAIL provider=" + providerName + " type=" + cause.getClass().getSimpleName() + " message=" + String.valueOf(cause.getMessage()));
-                    System.err.println("[Minecraft AI Agent][" + providerName + "] HTTP FAIL in="
-                            + elapsed + " ms type=" + cause.getClass().getName()
-                            + " message=" + String.valueOf(cause.getMessage()));
+                    AiAgentLog.error("HTTP FAIL provider=" + providerName + " type="
+                            + cause.getClass().getSimpleName() + " message=" + String.valueOf(cause.getMessage()));
+                    System.err.println("[Minecraft AI Agent][" + providerName + "] HTTP FAIL type="
+                            + cause.getClass().getName() + " message=" + String.valueOf(cause.getMessage()));
 
                     boolean retryable = cause instanceof ConnectException || cause instanceof HttpTimeoutException;
                     if (!retryable || attempt >= NETWORK_RETRIES) {
-                        return CompletableFuture.<HttpResponse<String>>failedFuture(
+                        return CompletableFuture.failedFuture(
                                 new IOException(providerName + " connection failed: " + cause.getMessage(), cause));
                     }
 
@@ -964,8 +898,16 @@ public final class AiAgentService {
                             () -> null,
                             CompletableFuture.delayedExecutor(delay, TimeUnit.SECONDS))
                             .thenCompose(ignored -> sendWithRetry(request, providerName, attempt + 1));
-                })
-                .thenCompose(future -> future);
+                });
+    }
+
+    private static long parseRetryAfterSeconds(String header, int attempt) {
+        try {
+            long seconds = Long.parseLong(header.trim());
+            return Math.max(1L, Math.min(30L, seconds));
+        } catch (NumberFormatException ignored) {
+            return Math.min(15L, 4L * (attempt + 1));
+        }
     }
 
     private static void logNetworkDiagnostics(URI uri, String providerName) {
