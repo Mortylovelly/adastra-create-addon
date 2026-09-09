@@ -16,6 +16,8 @@ public final class AiChatScreen extends Screen {
     private TextFieldWidget messageInput;
     private TextFieldWidget apiKeyInput;
     private ButtonWidget sendButton;
+    private ButtonWidget deepSeekButton;
+    private ButtonWidget groqButton;
     private boolean waiting;
     private int panelLeft;
     private int panelTop;
@@ -39,17 +41,30 @@ public final class AiChatScreen extends Screen {
         int keyY = panelTop + 31;
         apiKeyInput = new TextFieldWidget(
                 textRenderer, panelLeft + 14, keyY,
-                panelWidth - 150, 20, Text.literal("DeepSeek API key")
+                panelWidth - 150, 20, Text.literal("API key")
         );
         apiKeyInput.setMaxLength(300);
         apiKeyInput.setText(AiClientConfig.getApiKey());
-        apiKeyInput.setPlaceholder(Text.literal("Вставь DeepSeek API key один раз — он сохранится локально"));
+        apiKeyInput.setPlaceholder(Text.literal("Вставь API key выбранного провайдера — он сохранится локально"));
         addDrawableChild(apiKeyInput);
 
         addDrawableChild(ButtonWidget.builder(
                         Text.literal("Сохранить key"), button -> saveApiKey())
                 .dimensions(panelLeft + panelWidth - 126, keyY, 112, 20)
                 .build());
+
+        int providerY = panelTop + 57;
+        deepSeekButton = addDrawableChild(ButtonWidget.builder(
+                        Text.literal("DeepSeek"), button -> selectProvider("deepseek"))
+                .dimensions(panelLeft + 14, providerY, 108, 20)
+                .build());
+
+        groqButton = addDrawableChild(ButtonWidget.builder(
+                        Text.literal("Groq"), button -> selectProvider("groq"))
+                .dimensions(panelLeft + 128, providerY, 108, 20)
+                .build());
+
+        refreshProviderButtons();
 
         int inputY = panelTop + panelHeight - 34;
         messageInput = new TextFieldWidget(textRenderer, panelLeft + 14, inputY,
@@ -71,17 +86,45 @@ public final class AiChatScreen extends Screen {
         setInitialFocus(messageInput);
     }
 
+    private void selectProvider(String provider) {
+        if (waiting) return;
+        saveApiKeySilently();
+        AiClientConfig.setProvider(provider);
+        apiKeyInput.setText(AiClientConfig.getApiKey());
+        messages.add("AI: Выбран провайдер " + providerDisplayName() + ".");
+        refreshProviderButtons();
+    }
+
+    private void refreshProviderButtons() {
+        String provider = AiClientConfig.getProvider();
+        if (deepSeekButton != null) deepSeekButton.active = !provider.equals("deepseek");
+        if (groqButton != null) groqButton.active = !provider.equals("groq");
+    }
+
+    private void saveApiKeySilently() {
+        if (apiKeyInput != null) {
+            AiClientConfig.setApiKey(apiKeyInput.getText());
+        }
+    }
+
     private void saveApiKey() {
         AiClientConfig.setApiKey(apiKeyInput.getText());
         messages.add(AiClientConfig.hasApiKey()
-                ? "AI: DeepSeek API key сохранён локально."
+                ? "AI: " + providerDisplayName() + " API key сохранён локально."
                 : "AI: API key очищен.");
     }
 
     private void testConnection() {
         if (waiting) return;
+        saveApiKeySilently();
+        if (!AiClientConfig.hasApiKey()) {
+            messages.add("AI: Сначала вставь API key выбранного провайдера и нажми «Сохранить key».");
+            return;
+        }
+
         waiting = true;
-        messages.add("AI: Проверяю подключение к DeepSeek...");
+        String provider = providerDisplayName();
+        messages.add("AI: Проверяю подключение к " + provider + "...");
         AiAgentService.testConnection().handle((ok, throwable) -> {
             MinecraftClient client = MinecraftClient.getInstance();
             client.execute(() -> {
@@ -90,7 +133,7 @@ public final class AiChatScreen extends Screen {
                     Throwable cause = throwable.getCause() != null ? throwable.getCause() : throwable;
                     messages.add("AI: Ошибка: " + (cause.getMessage() == null ? cause.toString() : cause.getMessage()));
                 } else {
-                    messages.add(ok ? "AI: DeepSeek подключён и отвечает." : "AI: DeepSeek не вернул ожидаемый ответ.");
+                    messages.add(ok ? "AI: " + provider + " подключён и отвечает." : "AI: " + provider + " не вернул ожидаемый ответ.");
                 }
             });
             return null;
@@ -100,11 +143,12 @@ public final class AiChatScreen extends Screen {
     private void sendMessage() {
         if (waiting || messageInput == null) return;
 
+        saveApiKeySilently();
         String message = messageInput.getText().trim();
         if (message.isEmpty()) return;
 
         if (!AiClientConfig.hasApiKey()) {
-            messages.add("AI: Сначала вставь DeepSeek API key сверху и нажми «Сохранить key».");
+            messages.add("AI: Сначала вставь " + providerDisplayName() + " API key сверху и нажми «Сохранить key».");
             return;
         }
 
@@ -131,6 +175,10 @@ public final class AiChatScreen extends Screen {
         });
     }
 
+    private String providerDisplayName() {
+        return AiClientConfig.getProvider().equals("groq") ? "Groq" : "DeepSeek";
+    }
+
     @Override
     public void renderBackground(DrawContext context, int mouseX, int mouseY, float delta) {
         context.fill(0, 0, width, height, 0x55000000);
@@ -142,16 +190,18 @@ public final class AiChatScreen extends Screen {
 
         context.fill(panelLeft, panelTop, panelLeft + panelWidth, panelTop + panelHeight, 0xF0121216);
         context.fill(panelLeft, panelTop, panelLeft + panelWidth, panelTop + 1, 0xFFFFFFFF);
-        context.fill(panelLeft, panelTop + 57, panelLeft + panelWidth, panelTop + 58, 0xFF303038);
+        context.fill(panelLeft, panelTop + 82, panelLeft + panelWidth, panelTop + 83, 0xFF303038);
 
         context.drawTextWithShadow(textRenderer, title, panelLeft + 14, panelTop + 10, 0xFFFFFF);
         context.drawTextWithShadow(textRenderer,
-                waiting ? "ИИ выполняет действия в мире..." : "DeepSeek AI Agent",
-                panelLeft + 14, panelTop + 62,
+                waiting ? "ИИ выполняет действия в мире..." : providerDisplayName() + " AI Agent",
+                panelLeft + 14, panelTop + 92,
                 waiting ? 0xA0FFA0 : 0xB0B0B8
         );
+        context.drawTextWithShadow(textRenderer,
+                "Провайдер:", panelLeft + 248, panelTop + 62, 0xC0C0C8);
 
-        int chatTop = panelTop + 82;
+        int chatTop = panelTop + 112;
         int chatBottom = panelTop + panelHeight - 46;
         int maxWidth = panelWidth - 28;
         int y = chatBottom;
