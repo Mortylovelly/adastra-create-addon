@@ -91,6 +91,7 @@ public final class AiAgentService {
 
         AiAgentStatus.set("Анализирую запрос");
         AiAgentStatus.set("Анализирую запрос");
+        AiAgentStatus.set("Анализирую запрос");
         System.out.println("[Minecraft AI Agent][" + providerName(provider) + "] TASK START chars=" + message.length());
 
         if (provider.equals("deepseek")) {
@@ -111,6 +112,7 @@ public final class AiAgentService {
             payload.addProperty("max_output_tokens", 32);
             AiAgentStatus.set("Проверяю подключение к DeepSeek");
         AiAgentStatus.set("Проверяю подключение к DeepSeek");
+        AiAgentStatus.set("Проверяю подключение к DeepSeek");
         return request(DEEPSEEK_URI, AiClientConfig.getDeepSeekApiKey(), payload, "DeepSeek")
                     .thenApply(root -> root.has("output_text")
                             && !root.get("output_text").isJsonNull()
@@ -126,6 +128,7 @@ public final class AiAgentService {
         payload.addProperty("temperature", 0);
         payload.addProperty("max_tokens", 32);
 
+        AiAgentStatus.set("Проверяю подключение к " + providerName(provider));
         AiAgentStatus.set("Проверяю подключение к " + providerName(provider));
         AiAgentStatus.set("Проверяю подключение к " + providerName(provider));
         return request(uriForProvider(provider), keyForProvider(provider), payload, providerName(provider))
@@ -171,6 +174,7 @@ public final class AiAgentService {
 
         AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
         AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
+        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
         return request(uriForProvider(provider), keyForProvider(provider), payload, providerName(provider))
                 .thenCompose(response -> {
                     JsonObject choice = firstChoice(response);
@@ -190,6 +194,7 @@ public final class AiAgentService {
                         String text = assistant.has("content") && !assistant.get("content").isJsonNull()
                                 ? assistant.get("content").getAsString()
                                 : "Ответ без текста.";
+                        AiAgentStatus.clear();
                         AiAgentStatus.clear();
                         AiAgentStatus.clear();
                         System.out.println("[Minecraft AI Agent][" + providerName(provider) + "] TASK END rounds=" + round + " toolCalls=" + totalCalls);
@@ -284,6 +289,7 @@ public final class AiAgentService {
 
         AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
         AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
+        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
         return request(DEEPSEEK_URI, AiClientConfig.getDeepSeekApiKey(), payload, "DeepSeek")
                 .thenCompose(response -> {
                     JsonArray output = response.has("output") && response.get("output").isJsonArray()
@@ -306,6 +312,7 @@ public final class AiAgentService {
                         String text = response.has("output_text") && !response.get("output_text").isJsonNull()
                                 ? response.get("output_text").getAsString()
                                 : "DeepSeek не вернул текстовый ответ.";
+                        AiAgentStatus.clear();
                         AiAgentStatus.clear();
                         AiAgentStatus.clear();
                         System.out.println("[Minecraft AI Agent][DeepSeek] TASK END rounds=" + round + " toolCalls=" + totalCalls);
@@ -358,6 +365,7 @@ public final class AiAgentService {
             return CompletableFuture.completedFuture(cached.deepCopy());
         }
 
+        AiAgentStatus.set(statusForTool(name));
         AiAgentStatus.set(statusForTool(name));
         AiAgentStatus.set(statusForTool(name));
         System.out.println("[Minecraft AI Agent] TOOL CALL name=" + name + " args=" + compactJson(arguments, 700));
