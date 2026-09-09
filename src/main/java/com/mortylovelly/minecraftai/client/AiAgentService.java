@@ -253,7 +253,11 @@ public final class AiAgentService {
         int changed = 0;
         for (JsonElement element : blocks) {
             JsonObject entry = element.getAsJsonObject();
-            BlockPos pos = new BlockPos(requiredInt(entry, "x"), requiredInt(entry, "y"), requiredInt(entry, "z"));
+            BlockPos pos = new BlockPos(
+                    requiredInt(entry, "x"),
+                    requiredInt(entry, "y"),
+                    requiredInt(entry, "z")
+            );
             Identifier id = Identifier.tryParse(string(entry, "block", ""));
             if (id == null || !Registries.BLOCK.containsId(id)) {
                 throw new IllegalArgumentException("Unknown block: " + id);
