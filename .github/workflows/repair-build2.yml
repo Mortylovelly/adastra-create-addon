@@ -1,0 +1,59 @@
+name: Fix and Build Minecraft AI Agent
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix-and-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: temurin
+
+      - name: Fix command tool
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java')
+          text = path.read_text(encoding='utf-8')
+          old_line = '            int result = server.getCommandManager().executeWithPrefix(server.getCommandSource(), command);'
+          new_line = '            server.getCommandManager().executeWithPrefix(server.getCommandSource(), command);'
+          if old_line in text:
+              text = text.replace(old_line, new_line, 1)
+          text = text.replace('            data.addProperty("result", result);\n', '', 1)
+          path.write_text(text, encoding='utf-8')
+          print('Command tool fixed:', old_line not in text)
+          PY
+
+      - name: Commit fix
+        run: |
+          if git diff --quiet -- src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java; then
+            echo "Source is already fixed."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java
+          git commit -m "Fix command tool compilation"
+          git push
+
+      - name: Build
+        run: ./gradlew build --no-daemon
+
+      - name: Upload mod jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: minecraft-ai-agent-fixed
+          path: build/libs/*.jar
