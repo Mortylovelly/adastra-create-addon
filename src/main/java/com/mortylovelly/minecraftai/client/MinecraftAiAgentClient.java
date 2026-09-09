@@ -13,6 +13,11 @@ public final class MinecraftAiAgentClient implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
+        // Prefer IPv4 for API connections. This avoids connection hangs on networks
+        // where IPv6 routing to external API hosts is broken or unavailable.
+        System.setProperty("java.net.preferIPv4Stack", "true");
+        System.setProperty("java.net.preferIPv4Addresses", "true");
+
         openPanelKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
                 "key.minecraft_ai_agent.open_panel",
                 InputUtil.Type.KEYSYM,
