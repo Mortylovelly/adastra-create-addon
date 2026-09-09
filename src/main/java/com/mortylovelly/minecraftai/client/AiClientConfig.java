@@ -16,6 +16,7 @@ public final class AiClientConfig {
 
     private static String deepSeekApiKey = "";
     private static String groqApiKey = "";
+    private static String openRouterApiKey = "";
     private static String provider = "deepseek";
 
     private AiClientConfig() {}
@@ -36,9 +37,15 @@ public final class AiClientConfig {
                 groqApiKey = object.get("groq_api_key").getAsString().trim();
             }
 
+            if (object.has("openrouter_api_key")) {
+                openRouterApiKey = object.get("openrouter_api_key").getAsString().trim();
+            }
+
             if (object.has("provider")) {
                 String savedProvider = object.get("provider").getAsString().trim().toLowerCase();
-                if (savedProvider.equals("groq") || savedProvider.equals("deepseek")) {
+                if (savedProvider.equals("groq")
+                        || savedProvider.equals("deepseek")
+                        || savedProvider.equals("openrouter")) {
                     provider = savedProvider;
                 }
             }
@@ -53,12 +60,20 @@ public final class AiClientConfig {
 
     public static void setProvider(String value) {
         String normalized = value == null ? "deepseek" : value.trim().toLowerCase();
-        provider = normalized.equals("groq") ? "groq" : "deepseek";
+        if (normalized.equals("groq") || normalized.equals("openrouter")) {
+            provider = normalized;
+        } else {
+            provider = "deepseek";
+        }
         save();
     }
 
     public static String getApiKey() {
-        return provider.equals("groq") ? groqApiKey : deepSeekApiKey;
+        return switch (provider) {
+            case "groq" -> groqApiKey;
+            case "openrouter" -> openRouterApiKey;
+            default -> deepSeekApiKey;
+        };
     }
 
     public static String getDeepSeekApiKey() {
@@ -69,16 +84,20 @@ public final class AiClientConfig {
         return groqApiKey;
     }
 
+    public static String getOpenRouterApiKey() {
+        return openRouterApiKey;
+    }
+
     public static boolean hasApiKey() {
         return !getApiKey().isBlank();
     }
 
     public static void setApiKey(String value) {
         String normalized = value == null ? "" : value.trim();
-        if (provider.equals("groq")) {
-            groqApiKey = normalized;
-        } else {
-            deepSeekApiKey = normalized;
+        switch (provider) {
+            case "groq" -> groqApiKey = normalized;
+            case "openrouter" -> openRouterApiKey = normalized;
+            default -> deepSeekApiKey = normalized;
         }
         save();
     }
@@ -88,6 +107,7 @@ public final class AiClientConfig {
         object.addProperty("provider", provider);
         object.addProperty("deepseek_api_key", deepSeekApiKey);
         object.addProperty("groq_api_key", groqApiKey);
+        object.addProperty("openrouter_api_key", openRouterApiKey);
 
         try {
             Files.createDirectories(CONFIG_PATH.getParent());
