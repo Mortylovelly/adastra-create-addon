@@ -180,9 +180,7 @@ public final class AiAgentService {
         }
 
         List<CompletableFuture<JsonObject>> futures = new ArrayList<>();
-        for (JsonObject call : calls) {
-            futures.add(executeToolAsync(call));
-        }
+        for (JsonObject call : calls) futures.add(executeToolAsync(call));
 
         return sequence(futures).thenCompose(results -> {
             synchronized (DEEPSEEK_CONVERSATION) {
@@ -230,8 +228,9 @@ public final class AiAgentService {
         List<JsonObject> validCalls = new ArrayList<>();
         for (JsonElement element : toolCalls) {
             if (!element.isJsonObject()) continue;
-            validCalls.add(element.getAsJsonObject());
-            futures.add(executeGroqToolAsync(element.getAsJsonObject()));
+            JsonObject call = element.getAsJsonObject();
+            validCalls.add(call);
+            futures.add(executeGroqToolAsync(call));
         }
 
         return sequence(futures).thenCompose(results -> {
@@ -245,7 +244,6 @@ public final class AiAgentService {
                     GROQ_CONVERSATION.add(result);
                 }
             }
-
             return groqRequest(buildGroqPayload())
                     .thenCompose(next -> processGroqResponse(next, depth + 1));
         });
@@ -273,11 +271,8 @@ public final class AiAgentService {
         JsonObject arguments;
         try {
             JsonElement raw = call.get("arguments");
-            if (raw != null && raw.isJsonObject()) {
-                arguments = raw.getAsJsonObject();
-            } else {
-                arguments = JsonParser.parseString(string(call, "arguments", "{}")).getAsJsonObject();
-            }
+            if (raw != null && raw.isJsonObject()) arguments = raw.getAsJsonObject();
+            else arguments = JsonParser.parseString(string(call, "arguments", "{}")).getAsJsonObject();
         } catch (RuntimeException exception) {
             JsonObject error = new JsonObject();
             error.addProperty("ok", false);
@@ -459,9 +454,11 @@ public final class AiAgentService {
     private static JsonArray groqToolsArray() {
         JsonArray array = new JsonArray();
         for (JsonObject tool : TOOLS) {
+            JsonObject function = tool.deepCopy();
+            function.remove("type");
             JsonObject wrapper = new JsonObject();
             wrapper.addProperty("type", "function");
-            wrapper.add("function", tool.deepCopy());
+            wrapper.add("function", function);
             array.add(wrapper);
         }
         return array;
@@ -565,12 +562,7 @@ public final class AiAgentService {
                 property("item", "string", "Minecraft item ID such as minecraft:diamond_sword.", true),
                 property("count", "integer", "Amount from 1 to 64. Defaults to 1.", false)
         )));
-        List<JsonObject> flatFunctions = new ArrayList<>();
-        for (JsonObject tool : tools) {
-            JsonObject flat = tool.getAsJsonObject();
-            flatFunctions.add(flat);
-        }
-        return flatFunctions;
+        return tools;
     }
 
     private static CompletableFuture<JsonObject> deepSeekRequest(JsonObject payload) {
