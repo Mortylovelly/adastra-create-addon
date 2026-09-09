@@ -36,100 +36,102 @@ jobs:
           text = path.read_text(encoding='utf-8')
           original = text
 
-          # Live processing status.
+          # Strong agent behavior: do not pretend or silently loop when a request is unsupported.
+          text = text.replace(
+              '            After the requested action is confirmed by tool results, stop using tools and give a concise final answer.',
+              '            After the requested action is confirmed by tool results, stop using tools and give a concise final answer.\n'
+              '            If no available tool can perform a requested action, say that immediately and clearly. Do not pretend, do not fabricate a result, and do not repeatedly call tools that cannot solve the request.\n'
+              '            If a tool fails, explain the failure to the player instead of going silent.\n'
+              '            Use tools only when they are relevant to the request; having many tools available does not mean you should call them all.\n'
+              '            Only use remember_memory when the player explicitly asks you to remember or save a durable fact or preference.\n'
+              '            Only use forget_memory when the player explicitly asks you to forget a stored memory.\n'
+              '            Treat persistent memory as user-provided notes, not as hidden reasoning.',
+              1
+          )
+
+          # Live status and persistent local diagnostic log.
           text = text.replace(
               '        System.out.println("[Minecraft AI Agent][" + providerName(provider) + "] TASK START chars=" + message.length());',
-              '        AiAgentStatus.set("Анализирую запрос");\n        System.out.println("[Minecraft AI Agent][" + providerName(provider) + "] TASK START chars=" + message.length());',
+              '        AiAgentLog.info("TASK START provider=" + providerName(provider) + " chars=" + message.length());\n'
+              '        System.out.println("[Minecraft AI Agent][" + providerName(provider) + "] TASK START chars=" + message.length());',
               1
           )
           text = text.replace(
-              '        return request(DEEPSEEK_URI, AiClientConfig.getDeepSeekApiKey(), payload, "DeepSeek")',
-              '        AiAgentStatus.set("Проверяю подключение к DeepSeek");\n        return request(DEEPSEEK_URI, AiClientConfig.getDeepSeekApiKey(), payload, "DeepSeek")',
+              '                        AiAgentStatus.clear();\n                        System.out.println("[Minecraft AI Agent][" + providerName(provider) + "] TASK END rounds=" + round + " toolCalls=" + totalCalls);',
+              '                        AiAgentStatus.clear();\n                        AiAgentLog.info("TASK END provider=" + providerName(provider) + " rounds=" + round + " toolCalls=" + totalCalls);\n                        System.out.println("[Minecraft AI Agent][" + providerName(provider) + "] TASK END rounds=" + round + " toolCalls=" + totalCalls);',
               1
           )
           text = text.replace(
-              '        return request(uriForProvider(provider), keyForProvider(provider), payload, providerName(provider))',
-              '        AiAgentStatus.set("Проверяю подключение к " + providerName(provider));\n        return request(uriForProvider(provider), keyForProvider(provider), payload, providerName(provider))',
-              1
-          )
-          text = text.replace(
-              '        return request(uriForProvider(provider), keyForProvider(provider), payload, providerName(provider))\n                .thenCompose(response -> {',
-              '        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));\n        return request(uriForProvider(provider), keyForProvider(provider), payload, providerName(provider))\n                .thenCompose(response -> {',
-              1
-          )
-          text = text.replace(
-              '                    if (toolCalls.isEmpty()) {\n                        String text',
-              '                    if (toolCalls.isEmpty()) {\n                        AiAgentStatus.set("Формирую ответ");\n                        String text',
-              1
-          )
-          text = text.replace(
-              '        return request(DEEPSEEK_URI, AiClientConfig.getDeepSeekApiKey(), payload, "DeepSeek")\n                .thenCompose(response -> {',
-              '        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));\n        return request(DEEPSEEK_URI, AiClientConfig.getDeepSeekApiKey(), payload, "DeepSeek")\n                .thenCompose(response -> {',
-              1
-          )
-          text = text.replace(
-              '                    if (calls.isEmpty()) {\n                        String text',
-              '                    if (calls.isEmpty()) {\n                        AiAgentStatus.set("Формирую ответ");\n                        String text',
-              1
-          )
-          text = text.replace(
-              '                    for (JsonObject call : calls) {\n                        results.add(executeToolWithCache(',
-              '                    for (JsonObject call : calls) {\n                        AiAgentStatus.set(statusForTool(string(call, "name", "unknown")));\n                        results.add(executeToolWithCache(',
+              '                        AiAgentStatus.clear();\n                        System.out.println("[Minecraft AI Agent][DeepSeek] TASK END rounds=" + round + " toolCalls=" + totalCalls);',
+              '                        AiAgentStatus.clear();\n                        AiAgentLog.info("TASK END provider=DeepSeek rounds=" + round + " toolCalls=" + totalCalls);\n                        System.out.println("[Minecraft AI Agent][DeepSeek] TASK END rounds=" + round + " toolCalls=" + totalCalls);',
               1
           )
           text = text.replace(
               '        System.out.println("[Minecraft AI Agent] TOOL CALL name=" + name + " args=" + compactJson(arguments, 700));',
-              '        AiAgentStatus.set(statusForTool(name));\n        System.out.println("[Minecraft AI Agent] TOOL CALL name=" + name + " args=" + compactJson(arguments, 700));',
+              '        AiAgentLog.info("TOOL CALL name=" + name + " args=" + compactJson(arguments, 700));\n        System.out.println("[Minecraft AI Agent] TOOL CALL name=" + name + " args=" + compactJson(arguments, 700));',
               1
           )
           text = text.replace(
-              '                JsonObject result = executeTool(server, name, arguments);\n                executedCalls.put(key, result.deepCopy());',
-              '                JsonObject result = executeTool(server, name, arguments);\n                AiAgentStatus.set("Готово: " + statusForTool(name));\n                executedCalls.put(key, result.deepCopy());',
+              '                AiAgentStatus.set("Готово: " + statusForTool(name));\n                executedCalls.put(key, result.deepCopy());',
+              '                AiAgentStatus.set("Готово: " + statusForTool(name));\n                AiAgentLog.info("TOOL RESULT name=" + name + " ok=" + result.has("ok") + " data=" + compactJson(result, 500));\n                executedCalls.put(key, result.deepCopy());',
               1
           )
-          marker = '    private static String toolName(JsonObject call) {'
-          helper = '''    private static String statusForTool(String name) {\n        return switch (name) {\n            case "get_player_state" -> "Получаю позицию игрока";\n            case "get_block" -> "Проверяю блок";\n            case "scan_area" -> "Сканирую область";\n            case "place_blocks" -> "Строю блоки";\n            case "fill_area" -> "Заполняю область";\n            case "break_block" -> "Ломаю блок";\n            case "give_item" -> "Выдаю предмет";\n            case "get_inventory" -> "Проверяю инвентарь";\n            case "remember_memory" -> "Сохраняю в память";\n            case "forget_memory" -> "Удаляю из памяти";\n            default -> "Выполняю действие";\n        };\n    }\n\n'''
-          if 'private static String statusForTool(String name)' not in text:
+          text = text.replace(
+              '                future.complete(error);',
+              '                AiAgentLog.error("TOOL ERROR name=" + name + " message=" + error.get("error").getAsString());\n                future.complete(error);',
+              1
+          )
+          text = text.replace(
+              '                    return CompletableFuture.failedFuture(new IOException(\n                            providerName + " API " + response.statusCode() + ": " + errorText));',
+              '                    AiAgentLog.error("API ERROR provider=" + providerName + " status=" + response.statusCode() + " message=" + truncate(errorText, 500));\n                    return CompletableFuture.failedFuture(new IOException(\n                            providerName + " API " + response.statusCode() + ": " + errorText));',
+              1
+          )
+          text = text.replace(
+              '                    System.err.println("[Minecraft AI Agent][" + providerName + "] HTTP FAIL in="',
+              '                    AiAgentLog.error("HTTP FAIL provider=" + providerName + " type=" + cause.getClass().getSimpleName() + " message=" + String.valueOf(cause.getMessage()));\n                    System.err.println("[Minecraft AI Agent][" + providerName + "] HTTP FAIL in="',
+              1
+          )
+
+          # More useful world-control tools. These use fixed vanilla commands rather than exposing an arbitrary command console.
+          text = text.replace(
+              '            case "forget_memory" -> forgetMemory(args);\n            default -> throw new IllegalArgumentException("Unknown tool: " + name);',
+              '            case "forget_memory" -> forgetMemory(args);\n            case "set_time" -> setTime(server, args);\n            case "set_weather" -> setWeather(server, args);\n            case "teleport_player" -> teleportPlayer(server, args);\n            case "set_gamemode" -> setGamemode(server, args);\n            case "heal_player" -> healPlayer(server, args);\n            case "feed_player" -> feedPlayer(server, args);\n            case "clear_effects" -> clearEffects(server, args);\n            case "spawn_entity" -> spawnEntity(server, args);\n            case "list_players" -> listPlayers(server);\n            default -> throw new IllegalArgumentException("Unknown tool: " + name);',
+              1
+          )
+
+          marker = '    private static JsonObject getPlayerState(MinecraftServer server, JsonObject args) {'
+          methods = '''    private static JsonObject commandResult(MinecraftServer server, String command) {\n        try {\n            int result = server.getCommandManager().executeWithPrefix(server.getCommandSource(), command);\n            JsonObject data = new JsonObject();\n            data.addProperty("executed", true);\n            data.addProperty("result", result);\n            return data;\n        } catch (Exception exception) {\n            JsonObject data = new JsonObject();\n            data.addProperty("executed", false);\n            data.addProperty("error", exception.getMessage() == null ? exception.toString() : exception.getMessage());\n            return data;\n        }\n    }\n\n    private static JsonObject setTime(MinecraftServer server, JsonObject args) {\n        String time = string(args, "time", "day");\n        if (!(time.equals("day") || time.equals("night") || time.equals("noon") || time.equals("midnight"))) {\n            throw new IllegalArgumentException("time must be day, night, noon or midnight");\n        }\n        return commandResult(server, "time set " + time);\n    }\n\n    private static JsonObject setWeather(MinecraftServer server, JsonObject args) {\n        String weather = string(args, "weather", "clear");\n        if (!(weather.equals("clear") || weather.equals("rain") || weather.equals("thunder"))) {\n            throw new IllegalArgumentException("weather must be clear, rain or thunder");\n        }\n        return commandResult(server, "weather " + weather + " 1000000");\n    }\n\n    private static JsonObject teleportPlayer(MinecraftServer server, JsonObject args) {\n        ServerPlayerEntity player = getPlayer(server, string(args, "player", ""));\n        int x = requiredInt(args, "x");\n        int y = requiredInt(args, "y");\n        int z = requiredInt(args, "z");\n        return commandResult(server, "tp " + player.getName().getString() + " " + x + " " + y + " " + z);\n    }\n\n    private static JsonObject setGamemode(MinecraftServer server, JsonObject args) {\n        ServerPlayerEntity player = getPlayer(server, string(args, "player", ""));\n        String mode = string(args, "mode", "survival");\n        if (!(mode.equals("survival") || mode.equals("creative") || mode.equals("adventure") || mode.equals("spectator"))) {\n            throw new IllegalArgumentException("mode must be survival, creative, adventure or spectator");\n        }\n        return commandResult(server, "gamemode " + mode + " " + player.getName().getString());\n    }\n\n    private static JsonObject healPlayer(MinecraftServer server, JsonObject args) {\n        ServerPlayerEntity player = getPlayer(server, string(args, "player", ""));\n        return commandResult(server, "effect give " + player.getName().getString() + " minecraft:instant_health 1 10 true");\n    }\n\n    private static JsonObject feedPlayer(MinecraftServer server, JsonObject args) {\n        ServerPlayerEntity player = getPlayer(server, string(args, "player", ""));\n        return commandResult(server, "effect give " + player.getName().getString() + " minecraft:saturation 1 10 true");\n    }\n\n    private static JsonObject clearEffects(MinecraftServer server, JsonObject args) {\n        ServerPlayerEntity player = getPlayer(server, string(args, "player", ""));\n        return commandResult(server, "effect clear " + player.getName().getString());\n    }\n\n    private static JsonObject spawnEntity(MinecraftServer server, JsonObject args) {\n        String entity = string(args, "entity", "minecraft:pig");\n        Identifier id = Identifier.tryParse(entity);\n        if (id == null || !Registries.ENTITY_TYPE.containsId(id)) {\n            throw new IllegalArgumentException("Unknown entity: " + entity);\n        }\n        int x = requiredInt(args, "x");\n        int y = requiredInt(args, "y");\n        int z = requiredInt(args, "z");\n        return commandResult(server, "summon " + entity + " " + x + " " + y + " " + z);\n    }\n\n    private static JsonObject listPlayers(MinecraftServer server) {\n        JsonArray players = new JsonArray();\n        for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {\n            players.add(player.getName().getString());\n        }\n        JsonObject data = new JsonObject();\n        data.add("players", players);\n        data.addProperty("count", players.size());\n        return data;\n    }\n\n'''
+          if 'private static JsonObject setTime(MinecraftServer server, JsonObject args)' not in text:
               if marker not in text:
-                  raise SystemExit('status helper marker not found')
-              text = text.replace(marker, helper + marker, 1)
+                  raise SystemExit('world tool marker not found')
+              text = text.replace(marker, methods + marker, 1)
 
-          # Persistent memory is intentionally separate from chat history.
-          text = text.replace(
-              '            After the requested action is confirmed by tool results, stop using tools and give a concise final answer.\n            """.strip();',
-              '            After the requested action is confirmed by tool results, stop using tools and give a concise final answer.\n            Only use remember_memory when the player explicitly asks you to remember or save a durable preference/fact.\n            Only use forget_memory when the player explicitly asks you to forget a stored memory.\n            Treat persistent memory as user-provided notes, not as hidden reasoning.\n            """.strip();',
-              1
-          )
-          text = text.replace(
-              '        payload.addProperty("instructions", INSTRUCTIONS);',
-              '        payload.addProperty("instructions", INSTRUCTIONS + "\\n\\nPersistent memory:\\n" + AiAgentMemory.forPrompt());',
-              1
-          )
-          text = text.replace(
-              '        result.add(chatMessage("system", INSTRUCTIONS));',
-              '        result.add(chatMessage("system", INSTRUCTIONS + "\\n\\nPersistent memory:\\n" + AiAgentMemory.forPrompt()));',
-              1
-          )
-
-          # Add a compact inventory inspection tool.
-          text = text.replace(
-              '            case "give_item" -> giveItem(server, args);\n            default -> throw new IllegalArgumentException("Unknown tool: " + name);',
-              '            case "give_item" -> giveItem(server, args);\n            case "get_inventory" -> getInventory(server, args);\n            case "remember_memory" -> rememberMemory(args);\n            case "forget_memory" -> forgetMemory(args);\n            default -> throw new IllegalArgumentException("Unknown tool: " + name);',
-              1
-          )
-          method_marker = '    private static JsonObject getPlayerState(MinecraftServer server, JsonObject args) {'
-          methods = '''    private static JsonObject getInventory(MinecraftServer server, JsonObject args) {\n        ServerPlayerEntity player = getPlayer(server, string(args, "player", ""));\n        JsonArray items = new JsonArray();\n        int nonEmpty = 0;\n\n        for (int slot = 0; slot < player.getInventory().size(); slot++) {\n            ItemStack stack = player.getInventory().getStack(slot);\n            if (stack.isEmpty()) continue;\n            nonEmpty++;\n\n            JsonObject item = new JsonObject();\n            item.addProperty("slot", slot);\n            item.addProperty("item", Registries.ITEM.getId(stack.getItem()).toString());\n            item.addProperty("count", stack.getCount());\n            items.add(item);\n        }\n\n        JsonObject data = new JsonObject();\n        data.addProperty("name", player.getName().getString());\n        data.addProperty("occupied_slots", nonEmpty);\n        data.add("items", items);\n        return data;\n    }\n\n    private static JsonObject rememberMemory(JsonObject args) {\n        String text = string(args, "text", "");\n        boolean added = AiAgentMemory.remember(text);\n        JsonObject data = new JsonObject();\n        data.addProperty("saved", added);\n        data.addProperty("memory_count", AiAgentMemory.count());\n        data.addProperty("text", text);\n        return data;\n    }\n\n    private static JsonObject forgetMemory(JsonObject args) {\n        String text = string(args, "text", "");\n        boolean removed = AiAgentMemory.forget(text);\n        JsonObject data = new JsonObject();\n        data.addProperty("removed", removed);\n        data.addProperty("memory_count", AiAgentMemory.count());\n        data.addProperty("text", text);\n        return data;\n    }\n\n'''
-          if 'private static JsonObject getInventory(MinecraftServer server, JsonObject args)' not in text:
-              if method_marker not in text:
-                  raise SystemExit('inventory marker not found')
-              text = text.replace(method_marker, methods + method_marker, 1)
-
+          # Add tool definitions.
           tool_marker = '        tools.add(function("give_item", "Give an item directly to a player. Count is clamped to 1..64.", objectProperties('
-          tool_block = '''        tools.add(function("get_inventory", "Inspect the current player's inventory so the agent can see which materials/items are available. This is read-only.", objectProperties(\n                property("player", "string", "Player name. Empty means the first online player.", false)\n        )));\n        tools.add(function("remember_memory", "Save one durable user-requested fact or preference to persistent local memory. Use only when the player explicitly asks to remember it.", objectProperties(\n                property("text", "string", "One concise fact or preference to remember.", true)\n        )));\n        tools.add(function("forget_memory", "Remove one exact stored memory entry. Use only when the player explicitly asks to forget it.", objectProperties(\n                property("text", "string", "The exact stored memory text to remove.", true)\n        )));\n'''
-          if 'function("get_inventory"' not in text:
+          tool_block = '''        tools.add(function("set_time", "Set the Minecraft world time. Use only when requested.", objectProperties(\n                enumProperty("time", new String[]{"day", "night", "noon", "midnight"}, "Desired world time.", true)\n        )));\n        tools.add(function("set_weather", "Set the Minecraft weather. Use only when requested.", objectProperties(\n                enumProperty("weather", new String[]{"clear", "rain", "thunder"}, "Desired weather.", true)\n        )));\n        tools.add(function("teleport_player", "Teleport a player to exact integer coordinates.", objectProperties(\n                property("player", "string", "Player name. Empty means the first online player.", false),\n                intProperty("x"), intProperty("y"), intProperty("z")\n        )));\n        tools.add(function("set_gamemode", "Change a player's gamemode.", objectProperties(\n                property("player", "string", "Player name. Empty means the first online player.", false),\n                enumProperty("mode", new String[]{"survival", "creative", "adventure", "spectator"}, "Desired gamemode.", true)\n        )));\n        tools.add(function("heal_player", "Restore a player's health using a controlled vanilla effect command.", objectProperties(\n                property("player", "string", "Player name. Empty means the first online player.", false)\n        )));\n        tools.add(function("feed_player", "Restore a player's hunger using a controlled vanilla effect command.", objectProperties(\n                property("player", "string", "Player name. Empty means the first online player.", false)\n        )));\n        tools.add(function("clear_effects", "Remove all active potion effects from a player.", objectProperties(\n                property("player", "string", "Player name. Empty means the first online player.", false)\n        )));\n        tools.add(function("spawn_entity", "Spawn one vanilla or modded entity at exact coordinates.", objectProperties(\n                property("entity", "string", "Entity ID such as minecraft:pig or another registered entity.", true),\n                intProperty("x"), intProperty("y"), intProperty("z")\n        )));\n        tools.add(function("list_players", "List currently online Minecraft players. Read-only.", objectProperties()));\n'''
+          if 'function("set_time"' not in text:
               if tool_marker not in text:
-                  raise SystemExit('tool marker not found')
+                  raise SystemExit('give item tool marker not found')
               text = text.replace(tool_marker, tool_block + tool_marker, 1)
+
+          # Status strings for the new tools.
+          text = text.replace(
+              '            case "forget_memory" -> "Удаляю из памяти";\n            default -> "Выполняю действие";',
+              '            case "forget_memory" -> "Удаляю из памяти";\n            case "set_time" -> "Меняю время";\n            case "set_weather" -> "Меняю погоду";\n            case "teleport_player" -> "Телепортирую игрока";\n            case "set_gamemode" -> "Меняю режим игры";\n            case "heal_player" -> "Восстанавливаю здоровье";\n            case "feed_player" -> "Восстанавливаю сытость";\n            case "clear_effects" -> "Снимаю эффекты";\n            case "spawn_entity" -> "Создаю сущность";\n            case "list_players" -> "Получаю список игроков";\n            default -> "Выполняю действие";',
+              1
+          )
+
+          # User-friendly finalization on exceptional failures.
+          text = text.replace(
+              '        return deepSeekLoop(input, executedCalls, 0, 0, false);',
+              '        return deepSeekLoop(input, executedCalls, 0, 0, false)\n                .whenComplete((reply, throwable) -> {\n                    if (throwable != null) {\n                        AiAgentStatus.set("Ошибка: не удалось обработать запрос");\n                        AiAgentLog.error("TASK FAIL provider=DeepSeek message=" + String.valueOf(throwable.getMessage()));\n                    }\n                });',
+              1
+          )
+          text = text.replace(
+              '        return openAiLoop(messages, provider, executedCalls, 0, 0, false);',
+              '        return openAiLoop(messages, provider, executedCalls, 0, 0, false)\n                .whenComplete((reply, throwable) -> {\n                    if (throwable != null) {\n                        AiAgentStatus.set("Ошибка: не удалось обработать запрос");\n                        AiAgentLog.error("TASK FAIL provider=" + providerName(provider) + " message=" + String.valueOf(throwable.getMessage()));\n                    }\n                });',
+              1
+          )
 
           path.write_text(text, encoding='utf-8')
           print('Agent feature injection changed source:', text != original)
@@ -153,7 +155,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java gradle.properties
-          git commit -m "Add persistent AI memory and inventory tool"
+          git commit -m "Expand agent tools and add robust failure logging"
           git push
 
       - name: Build
