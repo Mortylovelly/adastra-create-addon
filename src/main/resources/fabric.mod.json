@@ -15,7 +15,7 @@
       "com.mortylovelly.minecraftai.MinecraftAiAgent"
     ],
     "client": [
-      "com.mortylovelly.minecraftai.client.MinecraftAiClient"
+      "com.mortylovelly.minecraftai.client.MinecraftAiAgentClient"
     ]
   },
   "depends": {
