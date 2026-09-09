@@ -110,8 +110,8 @@ public final class AiAgentService {
         synchronized (DEEPSEEK_CONVERSATION) {
             synchronized (GROQ_CONVERSATION) {
                 if (!provider.equals(historyProvider)) {
-                    DEEPSEEK_CONVERSATION.clear();
-                    GROQ_CONVERSATION.clear();
+                    while (!DEEPSEEK_CONVERSATION.isEmpty()) DEEPSEEK_CONVERSATION.remove(DEEPSEEK_CONVERSATION.size() - 1);
+                    while (!GROQ_CONVERSATION.isEmpty()) GROQ_CONVERSATION.remove(GROQ_CONVERSATION.size() - 1);
                     historyProvider = provider;
                 }
             }
