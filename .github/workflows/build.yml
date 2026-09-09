@@ -26,174 +26,14 @@ jobs:
           distribution: temurin
 
       - name: Repair AI agent source
-        shell: bash
-        run: |
-          set -e
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
+        run: python3 scripts/repair_ai_agent.py
 
-          path = Path('src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java')
-          text = path.read_text(encoding='utf-8')
-          original = text
-
-          # Keep the agent prompt compact. Previous CI mutations duplicated this block many times,
-          # making every request unnecessarily large and increasing provider rate-limit pressure.
-          prompt = '''    private static final String INSTRUCTIONS = """
-            You are the AI agent inside a Minecraft 1.21.1 singleplayer world.
-            You control the current Minecraft world only through the provided Minecraft tools.
-            Never claim a world action happened unless its tool result confirms it.
-            Never fabricate a tool result.
-            For normal conversation and questions about whether you can do something, answer directly without tools.
-            For an actual world-changing request, use the relevant tool and then report the result.
-            For an actual building request, call get_player_state once, choose a compact safe location near the player, and build efficiently.
-            Do not call get_block or scan_area unless the terrain or an exact existing block actually matters.
-            Prefer fill_area for large rectangular surfaces and place_blocks only for small details.
-            Do not repeat an identical successful tool call.
-            Do not perform destructive actions unless the player explicitly requested them.
-            Only use remember_memory or forget_memory when the player explicitly asks for memory changes.
-            If a tool fails, tell the player clearly instead of pretending it worked.
-            After the requested action is confirmed, stop using tools and give a concise final answer.
-            """.strip();'''
-          text, prompt_count = re.subn(
-              r'    private static final String INSTRUCTIONS = """.*?"""\.strip\(\);',
-              prompt,
-              text,
-              count=1,
-              flags=re.S,
-          )
-          if prompt_count != 1:
-              raise SystemExit('INSTRUCTIONS block not found')
-
-          # Lower the amount of context and tool looping for free providers.
-          replacements = {
-              '    private static final int MAX_TOOL_ROUNDS = 6;': '    private static final int MAX_TOOL_ROUNDS = 4;',
-              '    private static final int MAX_TOOL_CALLS = 12;': '    private static final int MAX_TOOL_CALLS = 8;',
-              '    private static final int API_HISTORY_MESSAGES = 8;': '    private static final int API_HISTORY_MESSAGES = 6;',
-              '    private static final int API_HISTORY_CHARS = 6000;': '    private static final int API_HISTORY_CHARS = 3500;',
-              '    private static final int MAX_TOOL_RESULT_CHARS = 1800;': '    private static final int MAX_TOOL_RESULT_CHARS = 1200;',
-          }
-          for old, new in replacements.items():
-              text = text.replace(old, new)
-
-          # Remove noisy duplicate diagnostics/status calls left by earlier automatic mutations.
-          text = re.sub(r'(?m)^(\s*)AiAgentStatus\.set\((.*)\);\n(?=\1AiAgentStatus\.set\(\2\);)', r'', text)
-          text = re.sub(r'(?m)^(\s*)AiAgentLog\.info\((.*)\);\n(?=\1AiAgentLog\.info\(\2\);)', r'', text)
-          text = re.sub(r'(?m)^(\s*)AiAgentLog\.error\((.*)\);\n(?=\1AiAgentLog\.error\(\2\);)', r'', text)
-          text = re.sub(r'(?m)^(\s*)AiAgentStatus\.clear\(\);\n(?=\1AiAgentStatus\.clear\(\);)', r'', text)
-
-          # Diagnostic log: a normal tool result is successful unless it explicitly contains ok=false.
-          text = text.replace(
-              'toolName + " ok=" + toolResult.has("ok") + ""',
-              'toolName + " ok=" + (!toolResult.has("ok") || toolResult.get("ok").getAsBoolean()) + ""',
-              1,
-          )
-
-          # Respect provider 429 retry-after values and retry transient rate limits before failing the task.
-          start = text.index('    private static CompletableFuture<HttpResponse<String>> sendWithRetry(')
-          end = text.index('    private static void logNetworkDiagnostics(', start)
-          retry_method = '''    private static CompletableFuture<HttpResponse<String>> sendWithRetry(
-            HttpRequest request, String providerName, int attempt) {
-        long started = System.nanoTime();
-        System.out.println("[Minecraft AI Agent][" + providerName + "] HTTP START attempt="
-                + (attempt + 1) + "/" + (NETWORK_RETRIES + 1));
-
-        return HTTP.sendAsync(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
-                .thenCompose(response -> {
-                    long elapsed = Duration.ofNanos(System.nanoTime() - started).toMillis();
-                    System.out.println("[Minecraft AI Agent][" + providerName + "] HTTP RESPONSE status="
-                            + response.statusCode() + " in=" + elapsed + " ms");
-
-                    boolean rateLimited = response.statusCode() == 429;
-                    if (rateLimited) {
-                        String retryAfterHeader = response.headers().firstValue("retry-after").orElse("");
-                        long delay = parseRetryAfterSeconds(retryAfterHeader, attempt);
-                        System.err.println("[Minecraft AI Agent][" + providerName + "] RATE LIMIT retry-after="
-                                + (retryAfterHeader.isBlank() ? "unknown" : retryAfterHeader));
-                        if (attempt < NETWORK_RETRIES) {
-                            System.out.println("[Minecraft AI Agent][" + providerName + "] RETRY after " + delay + " s");
-                            return CompletableFuture.supplyAsync(
-                                    () -> null,
-                                    CompletableFuture.delayedExecutor(delay, TimeUnit.SECONDS))
-                                    .thenCompose(ignored -> sendWithRetry(request, providerName, attempt + 1));
-                        }
-                    }
-
-                    if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                        return CompletableFuture.completedFuture(response);
-                    }
-                    return CompletableFuture.completedFuture(response);
-                })
-                .exceptionallyCompose(throwable -> {
-                    Throwable cause = rootCause(throwable);
-                    AiAgentLog.error("HTTP FAIL provider=" + providerName + " type="
-                            + cause.getClass().getSimpleName() + " message=" + String.valueOf(cause.getMessage()));
-                    System.err.println("[Minecraft AI Agent][" + providerName + "] HTTP FAIL type="
-                            + cause.getClass().getName() + " message=" + String.valueOf(cause.getMessage()));
-
-                    boolean retryable = cause instanceof ConnectException || cause instanceof HttpTimeoutException;
-                    if (!retryable || attempt >= NETWORK_RETRIES) {
-                        return CompletableFuture.failedFuture(
-                                new IOException(providerName + " connection failed: " + cause.getMessage(), cause));
-                    }
-
-                    long delay = 2L * (attempt + 1);
-                    System.out.println("[Minecraft AI Agent][" + providerName + "] RETRY after " + delay + " s");
-                    return CompletableFuture.supplyAsync(
-                            () -> null,
-                            CompletableFuture.delayedExecutor(delay, TimeUnit.SECONDS))
-                            .thenCompose(ignored -> sendWithRetry(request, providerName, attempt + 1));
-                });
-    }
-
-    private static long parseRetryAfterSeconds(String header, int attempt) {
-        try {
-            long seconds = Long.parseLong(header.trim());
-            return Math.max(1L, Math.min(30L, seconds));
-        } catch (NumberFormatException ignored) {
-            return Math.min(15L, 4L * (attempt + 1));
-        }
-    }
-
-'''
-          text = text[:start] + retry_method + text[end:]
-
-          # OpenRouter free endpoints can temporarily rate-limit one model. If Gemma is unavailable,
-          # automatically retry once through OpenRouter's free router, which filters for tool-calling support.
-          marker = '                    AiAgentLog.error("API ERROR provider=" + providerName + " status=" + response.statusCode()'
-          fallback_code = '''                    if (response.statusCode() == 429
-                            && "OpenRouter".equals(providerName)
-                            && payload.has("model")
-                            && OPENROUTER_MODEL.equals(payload.get("model").getAsString())) {
-                        JsonObject fallbackPayload = payload.deepCopy();
-                        fallbackPayload.addProperty("model", "openrouter/free");
-                        System.out.println("[Minecraft AI Agent][OpenRouter] Primary free model is rate-limited; trying openrouter/free");
-                        return request(OPENROUTER_URI, apiKey, fallbackPayload, "OpenRouter");
-                    }
-
-'''
-          if fallback_code not in text:
-              idx = text.index(marker)
-              text = text[:idx] + fallback_code + text[idx:]
-
-          # Guard against a surprisingly large retained history from older versions.
-          text = text.replace(
-              'for (AiChatHistory.Entry entry : AiChatHistory.getRecentForApi(API_HISTORY_MESSAGES, API_HISTORY_CHARS)) {',
-              'for (AiChatHistory.Entry entry : AiChatHistory.getRecentForApi(API_HISTORY_MESSAGES, API_HISTORY_CHARS)) {',
-              1,
-          )
-
-          path.write_text(text, encoding='utf-8')
-          print('AI agent repair changed source:', text != original)
-          print('Broken executeWithPrefix assignment remains:', 'int result = server.getCommandManager().executeWithPrefix' in text)
-          print('Repeated prompt lines:', text.count('If no available tool can perform a requested action'))
-          PY
-
-      - name: Verify source repair
+      - name: Verify AI agent source
         shell: bash
         run: |
           set -e
           ! grep -F 'int result = server.getCommandManager().executeWithPrefix' src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java
+          grep -F 'google/gemma-4-26b-a4b-it:free' src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java
           grep -F 'openrouter/free' src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java
           grep -F 'MAX_TOOL_ROUNDS = 4' src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java
           grep -F 'API_HISTORY_CHARS = 3500' src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java
@@ -204,13 +44,13 @@ jobs:
         run: |
           set -e
           if git diff --quiet -- src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java; then
-            echo "AI source already clean."
+            echo 'AI source already repaired.'
             exit 0
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java
-          git commit -m "Repair AI agent provider and tool behavior [skip ci]"
+          git commit -m 'Repair AI agent behavior [skip ci]'
           git push origin HEAD:main
 
       - name: Grant Gradle permission
