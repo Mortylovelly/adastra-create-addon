@@ -24,44 +24,96 @@ jobs:
       - name: Grant Gradle permission
         run: chmod +x gradlew
 
-      - name: Add Java network diagnostics
+      - name: Add reliable AI network diagnostics
         shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
           path = Path('src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java')
           text = path.read_text(encoding='utf-8')
 
+          # Normalize diagnostic imports without creating duplicates.
+          text = re.sub(r'import java\.net\.InetAddress;\n', '', text)
           text = text.replace(
               'import java.net.ConnectException;\n',
-              'import java.net.ConnectException;\nimport java.net.InetAddress;\nimport java.net.InetSocketAddress;\nimport java.net.Socket;\n'
+              'import java.net.ConnectException;\n'
+              'import java.net.InetAddress;\n'
+              'import java.net.InetSocketAddress;\n'
+              'import java.net.Socket;\n'
           )
+          text = re.sub(r'(import java\.net\.Socket;\n)(import java\.net\.Socket;\n)+', r'\1', text)
 
-          marker = '''        long started=System.nanoTime();\n        System.out.println("[Minecraft AI Agent]["+providerName+"] HTTP request start: " + uri + " | attempt " + (attempt+1) + "/" + (NETWORK_RETRIES+1) + " | payload=" + payload.toString().length() + " chars");'''
-          replacement = '''        long started=System.nanoTime();\n        System.out.println("[Minecraft AI Agent]["+providerName+"] HTTP request start: " + uri + " | attempt " + (attempt+1) + "/" + (NETWORK_RETRIES+1) + " | payload=" + payload.toString().length() + " chars");\n        logNetworkDiagnostics(uri, providerName);'''
-          text = text.replace(marker, replacement)
+          # Add a diagnostic call immediately before every actual HTTP sendWithRetry.
+          call = '        logNetworkDiagnostics(request.uri(), providerName);\n'
+          send_line = '        return sendWithRetry(request, providerName, 0)'
+          text = text.replace(
+              send_line,
+              call + send_line,
+              1
+          ) if call not in text else text
 
-          marker_method = '''    private static JsonObject deepSeekMessage(String content){'''
-          helper = '''    private static void logNetworkDiagnostics(URI uri, String providerName) {\n        String host = uri.getHost();\n        try {\n            InetAddress[] addresses = InetAddress.getAllByName(host);\n            StringBuilder resolved = new StringBuilder();\n            for (int i = 0; i < addresses.length; i++) {\n                if (i > 0) resolved.append(", ");\n                resolved.append(addresses[i].getHostAddress());\n            }\n            System.out.println("[Minecraft AI Agent]["+providerName+"] DNS " + host + " -> " + resolved);\n\n            for (InetAddress address : addresses) {\n                long started = System.nanoTime();\n                try (Socket socket = new Socket()) {\n                    socket.connect(new InetSocketAddress(address, 443), 5000);\n                    long ms = Duration.ofNanos(System.nanoTime() - started).toMillis();\n                    System.out.println("[Minecraft AI Agent]["+providerName+"] TCP 443 OK " + address.getHostAddress() + " in " + ms + " ms");\n                } catch (Exception exception) {\n                    long ms = Duration.ofNanos(System.nanoTime() - started).toMillis();\n                    System.err.println("[Minecraft AI Agent]["+providerName+"] TCP 443 FAIL " + address.getHostAddress() + " after " + ms + " ms: " + exception.getClass().getSimpleName() + " | " + exception.getMessage());\n                }\n            }\n        } catch (Exception exception) {\n            System.err.println("[Minecraft AI Agent]["+providerName+"] DNS ERROR for " + host + ": " + exception.getClass().getSimpleName() + " | " + exception.getMessage());\n        }\n    }\n\n'''
-          if marker_method in text and 'logNetworkDiagnostics(URI uri, String providerName)' not in text:
-              text = text.replace(marker_method, helper + marker_method)
+          # Add the helper once, immediately before deepSeekMessage.
+          marker = '    private static JsonObject deepSeekMessage(String content) {'
+          helper = '''    private static void logNetworkDiagnostics(URI uri, String providerName) {
+        String host = uri.getHost();
+        System.out.println("[Minecraft AI Agent][" + providerName + "] NET DIAGNOSTICS START host=" + host + " port=443");
+
+        try {
+            long dnsStarted = System.nanoTime();
+            InetAddress[] addresses = InetAddress.getAllByName(host);
+            long dnsMs = Duration.ofNanos(System.nanoTime() - dnsStarted).toMillis();
+
+            StringBuilder resolved = new StringBuilder();
+            for (int i = 0; i < addresses.length; i++) {
+                if (i > 0) resolved.append(", ");
+                resolved.append(addresses[i].getHostAddress());
+            }
+            System.out.println("[Minecraft AI Agent][" + providerName + "] DNS OK in " + dnsMs + " ms -> " + resolved);
+
+            for (InetAddress address : addresses) {
+                long tcpStarted = System.nanoTime();
+                try (Socket socket = new Socket()) {
+                    socket.connect(new InetSocketAddress(address, 443), 5000);
+                    long tcpMs = Duration.ofNanos(System.nanoTime() - tcpStarted).toMillis();
+                    System.out.println("[Minecraft AI Agent][" + providerName + "] TCP 443 OK "
+                            + address.getHostAddress() + " in " + tcpMs + " ms");
+                } catch (Exception exception) {
+                    long tcpMs = Duration.ofNanos(System.nanoTime() - tcpStarted).toMillis();
+                    System.err.println("[Minecraft AI Agent][" + providerName + "] TCP 443 FAIL "
+                            + address.getHostAddress() + " after " + tcpMs + " ms: "
+                            + exception.getClass().getSimpleName() + " | " + exception.getMessage());
+                }
+            }
+        } catch (Exception exception) {
+            System.err.println("[Minecraft AI Agent][" + providerName + "] DNS FAIL for " + host + ": "
+                    + exception.getClass().getSimpleName() + " | " + exception.getMessage());
+        }
+
+        System.out.println("[Minecraft AI Agent][" + providerName + "] NET DIAGNOSTICS END");
+    }
+
+'''
+          if 'private static void logNetworkDiagnostics(URI uri, String providerName)' not in text:
+              if marker not in text:
+                  raise SystemExit('Could not find deepSeekMessage marker')
+              text = text.replace(marker, helper + marker, 1)
 
           path.write_text(text, encoding='utf-8')
           PY
 
-      - name: Commit source diagnostic fix
+      - name: Commit diagnostic source
         shell: bash
         run: |
           if git diff --quiet -- src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java; then
-            echo "No source diagnostic changes needed."
+            echo "No diagnostic source changes needed."
             exit 0
           fi
-
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java
-          git commit -m "Add AI API network diagnostics"
+          git commit -m "Add reliable AI network diagnostics"
           git push
 
       - name: Build
