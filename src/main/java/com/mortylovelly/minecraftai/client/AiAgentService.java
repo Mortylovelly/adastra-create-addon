@@ -27,11 +27,11 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 public final class AiAgentService {
-    private static final URI GEMINI_URI = URI.create("https://generativelanguage.googleapis.com/v1beta/interactions");
+    private static final URI DEEPSEEK_URI = URI.create("https://api.deepseek.com/responses");
     private static final HttpClient HTTP = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .build();
-    private static final String MODEL = "gemini-3.8-flash";
+    private static final String MODEL = "deepseek-v4-flash";
     private static final String INSTRUCTIONS = """
             You are the AI agent inside a Minecraft 1.21.1 world.
             You can inspect and control the world only through the provided Minecraft tools.
@@ -45,24 +45,25 @@ public final class AiAgentService {
             """.strip();
 
     private static final List<JsonObject> TOOLS = createTools();
-    private static String previousInteractionId;
+    private static final JsonArray CONVERSATION = new JsonArray();
 
     private AiAgentService() {}
 
     public static CompletableFuture<String> chat(String message) {
         if (!AiClientConfig.hasApiKey()) {
-            return CompletableFuture.completedFuture("Сначала укажи Gemini API key в поле сверху.");
+            return CompletableFuture.completedFuture("Сначала укажи DeepSeek API key в поле сверху.");
         }
 
-        JsonObject payload = new JsonObject();
-        payload.addProperty("model", MODEL);
-        payload.addProperty("input", message);
-        payload.add("tools", toolsArray());
-        if (previousInteractionId != null && !previousInteractionId.isBlank()) {
-            payload.addProperty("previous_interaction_id", previousInteractionId);
+        JsonObject user = new JsonObject();
+        user.addProperty("type", "message");
+        user.addProperty("role", "user");
+        user.addProperty("content", message);
+
+        synchronized (CONVERSATION) {
+            CONVERSATION.add(user);
         }
 
-        return request(payload).thenCompose(response -> processInteraction(response, 0));
+        return request(buildPayload()).thenCompose(response -> processResponse(response, 0));
     }
 
     public static CompletableFuture<Boolean> testConnection() {
@@ -70,33 +71,47 @@ public final class AiAgentService {
 
         JsonObject payload = new JsonObject();
         payload.addProperty("model", MODEL);
-        payload.addProperty("input", "Reply with exactly: OK");
+        payload.addProperty("instructions", "Reply with exactly: OK");
+        payload.addProperty("input", "Connection test");
 
-        return request(payload).thenApply(root -> {
-            previousInteractionId = root.has("id") ? root.get("id").getAsString() : previousInteractionId;
-            return root.has("output_text") && !root.get("output_text").getAsString().isBlank();
-        });
+        return request(payload).thenApply(root ->
+                root.has("output_text") && !root.get("output_text").getAsString().isBlank());
     }
 
-    private static CompletableFuture<String> processInteraction(JsonObject response, int depth) {
+    private static JsonObject buildPayload() {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("model", MODEL);
+        payload.addProperty("instructions", INSTRUCTIONS);
+        synchronized (CONVERSATION) {
+            payload.add("input", CONVERSATION.deepCopy());
+        }
+        payload.add("tools", toolsArray());
+        return payload;
+    }
+
+    private static CompletableFuture<String> processResponse(JsonObject response, int depth) {
         if (depth >= 24) {
             return CompletableFuture.completedFuture("ИИ достиг лимита действий для одной задачи.");
         }
 
-        if (response.has("id")) {
-            previousInteractionId = response.get("id").getAsString();
-        }
-
-        JsonArray steps = response.has("steps") && response.get("steps").isJsonArray()
-                ? response.getAsJsonArray("steps")
+        JsonArray output = response.has("output") && response.get("output").isJsonArray()
+                ? response.getAsJsonArray("output")
                 : new JsonArray();
 
+        if (output.size() > 0) {
+            synchronized (CONVERSATION) {
+                for (JsonElement element : output) {
+                    CONVERSATION.add(element.deepCopy());
+                }
+            }
+        }
+
         List<JsonObject> calls = new ArrayList<>();
-        for (JsonElement element : steps) {
+        for (JsonElement element : output) {
             if (!element.isJsonObject()) continue;
-            JsonObject step = element.getAsJsonObject();
-            if ("function_call".equals(string(step, "type", ""))) {
-                calls.add(step);
+            JsonObject item = element.getAsJsonObject();
+            if ("function_call".equals(string(item, "type", ""))) {
+                calls.add(item);
             }
         }
 
@@ -113,37 +128,37 @@ public final class AiAgentService {
         }
 
         return sequence(futures).thenCompose(results -> {
-            JsonArray functionResults = new JsonArray();
-            for (int i = 0; i < calls.size(); i++) {
-                JsonObject call = calls.get(i);
-                JsonObject result = new JsonObject();
-                result.addProperty("type", "function_result");
-                result.addProperty("name", string(call, "name", ""));
-                result.addProperty("call_id", string(call, "id", ""));
-
-                JsonArray content = new JsonArray();
-                JsonObject text = new JsonObject();
-                text.addProperty("type", "text");
-                text.addProperty("text", results.get(i).toString());
-                content.add(text);
-                result.add("result", content);
-                functionResults.add(result);
+            synchronized (CONVERSATION) {
+                for (int i = 0; i < calls.size(); i++) {
+                    JsonObject call = calls.get(i);
+                    JsonObject result = new JsonObject();
+                    result.addProperty("type", "function_call_output");
+                    result.addProperty("call_id", string(call, "call_id", string(call, "id", "")));
+                    result.addProperty("output", results.get(i).toString());
+                    CONVERSATION.add(result);
+                }
             }
 
-            JsonObject payload = new JsonObject();
-            payload.addProperty("model", MODEL);
-            payload.addProperty("previous_interaction_id", previousInteractionId);
-            payload.add("input", functionResults);
-            payload.add("tools", toolsArray());
-            return request(payload).thenCompose(next -> processInteraction(next, depth + 1));
+            return request(buildPayload()).thenCompose(next -> processResponse(next, depth + 1));
         });
     }
 
     private static CompletableFuture<JsonObject> executeToolAsync(JsonObject call) {
         String name = string(call, "name", "");
-        JsonObject arguments = call.has("arguments") && call.get("arguments").isJsonObject()
-                ? call.getAsJsonObject("arguments")
-                : new JsonObject();
+        JsonObject arguments;
+        try {
+            JsonElement raw = call.get("arguments");
+            if (raw != null && raw.isJsonObject()) {
+                arguments = raw.getAsJsonObject();
+            } else {
+                arguments = JsonParser.parseString(string(call, "arguments", "{}")).getAsJsonObject();
+            }
+        } catch (RuntimeException exception) {
+            JsonObject error = new JsonObject();
+            error.addProperty("ok", false);
+            error.addProperty("error", "Invalid tool arguments: " + exception.getMessage());
+            return CompletableFuture.completedFuture(error);
+        }
 
         MinecraftClient client = MinecraftClient.getInstance();
         MinecraftServer server = client.getServer();
@@ -326,14 +341,14 @@ public final class AiAgentService {
         for (JsonObject property : properties) {
             String name = property.get("_name").getAsString();
             property.remove("_name");
+            boolean isRequired = property.has("_required") && property.get("_required").getAsBoolean();
+            property.remove("_required");
             map.add(name, property);
-            if (property.getAsJsonObject().has("_required") && property.getAsJsonObject().get("_required").getAsBoolean()) {
-                required.add(name);
-                property.remove("_required");
-            }
+            if (isRequired) required.add(name);
         }
         object.add("properties", map);
         object.add("required", required);
+        object.addProperty("additionalProperties", false);
         return object;
     }
 
@@ -356,10 +371,32 @@ public final class AiAgentService {
         property.addProperty("type", "array");
         property.addProperty("description", description);
         property.addProperty("_required", true);
-        property.add("items", new JsonObject());
-        JsonObject items = property.getAsJsonObject("items");
+
+        JsonObject items = new JsonObject();
         items.addProperty("type", "object");
-        items.addProperty("description", "A block placement object containing x, y, z and block.");
+        JsonObject itemProperties = new JsonObject();
+        JsonObject x = new JsonObject();
+        x.addProperty("type", "integer");
+        JsonObject y = new JsonObject();
+        y.addProperty("type", "integer");
+        JsonObject z = new JsonObject();
+        z.addProperty("type", "integer");
+        JsonObject block = new JsonObject();
+        block.addProperty("type", "string");
+        block.addProperty("description", "Minecraft block ID.");
+        itemProperties.add("x", x);
+        itemProperties.add("y", y);
+        itemProperties.add("z", z);
+        itemProperties.add("block", block);
+        items.add("properties", itemProperties);
+        JsonArray required = new JsonArray();
+        required.add("x");
+        required.add("y");
+        required.add("z");
+        required.add("block");
+        items.add("required", required);
+        items.addProperty("additionalProperties", false);
+        property.add("items", items);
         return property;
     }
 
@@ -389,9 +426,9 @@ public final class AiAgentService {
     }
 
     private static CompletableFuture<JsonObject> request(JsonObject payload) {
-        HttpRequest request = HttpRequest.newBuilder(GEMINI_URI)
+        HttpRequest request = HttpRequest.newBuilder(DEEPSEEK_URI)
                 .timeout(Duration.ofSeconds(120))
-                .header("x-goog-api-key", AiClientConfig.getApiKey())
+                .header("Authorization", "Bearer " + AiClientConfig.getApiKey())
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(payload.toString(), StandardCharsets.UTF_8))
                 .build();
@@ -404,11 +441,11 @@ public final class AiAgentService {
                             return CompletableFuture.completedFuture(body);
                         }
                         return CompletableFuture.failedFuture(new IOException(
-                                "Gemini API " + response.statusCode() + ": " + extractError(body)
+                                "DeepSeek API " + response.statusCode() + ": " + extractError(body)
                         ));
                     } catch (RuntimeException exception) {
                         return CompletableFuture.failedFuture(new IOException(
-                                "Неверный ответ Gemini API: " + exception.getMessage()
+                                "Неверный ответ DeepSeek API: " + exception.getMessage()
                         ));
                     }
                 });
