@@ -3,7 +3,7 @@
   "id": "minecraft_ai_agent",
   "version": "${version}",
   "name": "Minecraft AI Agent",
-  "description": "Connects Minecraft 1.21.1 to an external AI agent through a local bridge.",
+  "description": "An in-game AI agent panel for Minecraft 1.21.1 with world-control tools.",
   "authors": ["Mortylovelly"],
   "contact": {
     "sources": "https://github.com/Mortylovelly/adastra-create-addon"
@@ -13,6 +13,9 @@
   "entrypoints": {
     "main": [
       "com.mortylovelly.minecraftai.MinecraftAiAgent"
+    ],
+    "client": [
+      "com.mortylovelly.minecraftai.client.MinecraftAiAgentClient"
     ]
   },
   "depends": {
