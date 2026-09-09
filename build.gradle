@@ -1,55 +1,58 @@
 plugins {
-    id 'net.minecraftforge.gradle' version '[6.0,6.2)'
+    id 'fabric-loom' version '1.9.2'
+    id 'maven-publish'
 }
 
-version = '1.0.0'
-group = 'com.mortylovelly.adastracreate'
+version = project.mod_version
+group = project.maven_group
 
 base {
-    archivesName = 'adastra-create-1.20.1'
-}
-
-java {
-    toolchain.languageVersion = JavaLanguageVersion.of(17)
-}
-
-minecraft {
-    mappings channel: 'official', version: '1.20.1'
-    runs {
-        client {
-            workingDirectory project.file('run')
-            mods {
-                adastra_create { source sourceSets.main }
-            }
-        }
-        server {
-            workingDirectory project.file('run')
-            mods {
-                adastra_create { source sourceSets.main }
-            }
-        }
-    }
+    archivesName = project.archives_base_name
 }
 
 repositories {
-    maven { url = 'https://maven.minecraftforge.net' }
+    maven { url = 'https://maven.fabricmc.net/' }
 }
 
 dependencies {
-    minecraft 'net.minecraftforge:forge:1.20.1-47.2.0'
-    compileOnly fg.deobf(fileTree(dir: 'libs', include: ['ad_astra*.jar']))
-    compileOnly fg.deobf(fileTree(dir: 'libs', include: ['create*.jar']))
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
+    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+}
+
+processResources {
+    inputs.property "version", project.version
+
+    filesMatching("fabric.mod.json") {
+        expand "version": project.version
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    it.options.release = 21
+}
+
+java {
+    withSourcesJar()
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
 }
 
 jar {
-    manifest {
-        attributes([
-            'Specification-Title'   : 'adastra_create',
-            'Specification-Vendor'  : 'mortylovelly',
-            'Specification-Version' : '1',
-            'Implementation-Title'  : project.name,
-            'Implementation-Version': project.jar.archiveVersion,
-            'Implementation-Vendor' : 'mortylovelly',
-        ])
+    from("LICENSE") {
+        rename { "${it}_${project.archives_base_name}" }
+    }
+}
+
+publishing {
+    publications {
+        create("mavenJava", MavenPublication) {
+            artifactId = project.archives_base_name
+            from components.java
+        }
+    }
+    repositories {
+        // Add publishing repositories here when needed.
     }
 }
