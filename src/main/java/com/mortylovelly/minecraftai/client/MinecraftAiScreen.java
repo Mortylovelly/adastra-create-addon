@@ -38,26 +38,29 @@ public final class MinecraftAiScreen extends Screen {
     protected void init() {
         super.init();
 
-        int panelWidth = Math.min(760, width - 40);
+        int panelWidth = Math.min(820, width - 32);
         int panelLeft = (width - panelWidth) / 2;
-        int inputWidth = panelWidth - 96;
+        int panelTop = 20;
+        int panelBottom = height - 48;
+        int inputLeft = panelLeft + 14;
+        int inputWidth = panelWidth - 110;
 
         input = new TextFieldWidget(
                 textRenderer,
-                panelLeft + 12,
-                height - 38,
+                inputLeft,
+                panelBottom + 12,
                 inputWidth,
-                24,
-                Text.literal("Message")
+                26,
+                Text.literal("Сообщение")
         );
         input.setMaxLength(2000);
-        input.setPlaceholder(Text.literal("Напиши AI, что сделать в мире..."));
+        input.setPlaceholder(Text.literal("Напиши, что сделать в Minecraft..."));
         addSelectableChild(input);
 
         sendButton = ButtonWidget.builder(
                 Text.literal("Отправить"),
                 button -> sendCurrentMessage()
-        ).dimensions(panelLeft + 18 + inputWidth, height - 38, 66, 24).build();
+        ).dimensions(inputLeft + inputWidth + 8, panelBottom + 12, 74, 26).build();
         addDrawableChild(sendButton);
 
         setInitialFocus(input);
@@ -85,7 +88,7 @@ public final class MinecraftAiScreen extends Screen {
         input.setText("");
         waitingForReply = true;
         sendButton.active = false;
-        messages.add(new ChatLine(false, "Думаю и выполняю действия в мире..."));
+        messages.add(new ChatLine(false, "AI выполняет запрос..."));
 
         String body = "{\"message\":" + quoteJson(message)
                 + ",\"session_id\":" + quoteJson(sessionId) + "}";
@@ -145,47 +148,58 @@ public final class MinecraftAiScreen extends Screen {
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        renderBackground(context, mouseX, mouseY, delta);
+        // Intentionally do not call renderBackground(): Minecraft's screen
+        // blur makes the chat panel harder to read. Draw a dark, solid overlay.
+        context.fill(0, 0, width, height, 0xD9000000);
 
-        int panelWidth = Math.min(760, width - 40);
+        int panelWidth = Math.min(820, width - 32);
         int panelLeft = (width - panelWidth) / 2;
-        int panelTop = 28;
-        int panelBottom = height - 52;
-        int chatLeft = panelLeft + 12;
-        int chatWidth = panelWidth - 24;
+        int panelTop = 20;
+        int panelBottom = height - 48;
+        int chatLeft = panelLeft + 14;
+        int chatWidth = panelWidth - 28;
 
-        context.fill(panelLeft, panelTop, panelLeft + panelWidth, panelBottom, 0xE6101014);
-        context.drawBorder(panelLeft, panelTop, panelWidth, panelBottom - panelTop, 0xFF555A66);
-        context.drawTextWithShadow(textRenderer, title, chatLeft, 12, 0xFFFFFFFF);
+        context.fill(panelLeft, panelTop, panelLeft + panelWidth, panelBottom, 0xF20F1116);
+        context.drawBorder(panelLeft, panelTop, panelWidth, panelBottom - panelTop, 0xFF6B7280);
+
         context.drawTextWithShadow(
                 textRenderer,
-                Text.literal("O — открыть/закрыть | команды выполняются прямо в мире, без игрового чата"),
+                title,
                 chatLeft,
-                panelTop - 15,
-                0xFFAAAAAA
+                5,
+                0xFFFFFFFF
+        );
+        context.drawTextWithShadow(
+                textRenderer,
+                Text.literal("O — закрыть панель · AI может выполнять действия прямо в мире"),
+                chatLeft,
+                panelTop + 7,
+                0xFFB8C0CC
         );
 
-        int y = panelBottom - 10;
+        int y = panelBottom - 14;
         for (int i = messages.size() - 1; i >= 0; i--) {
             ChatLine line = messages.get(i);
             List<OrderedText> wrapped = textRenderer.wrapLines(
                     Text.literal((line.user ? "Ты: " : "AI: ") + line.text),
                     chatWidth
             );
+
             for (int j = wrapped.size() - 1; j >= 0; j--) {
-                y -= textRenderer.fontHeight + 3;
-                if (y >= panelTop + 8 && y <= panelBottom - 4) {
+                y -= textRenderer.fontHeight + 4;
+                if (y >= panelTop + 28 && y <= panelBottom - 4) {
                     context.drawTextWithShadow(
                             textRenderer,
                             wrapped.get(j),
                             chatLeft,
                             y,
-                            line.user ? 0xFFFFFFFF : 0xFFD6E7FF
+                            line.user ? 0xFFFFFFFF : 0xFFE0E7F0
                     );
                 }
             }
-            y -= 7;
-            if (y < panelTop - 40) {
+
+            y -= 8;
+            if (y < panelTop + 20) {
                 break;
             }
         }
