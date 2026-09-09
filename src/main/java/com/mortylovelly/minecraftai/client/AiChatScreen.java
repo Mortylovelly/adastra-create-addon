@@ -32,6 +32,7 @@ public final class AiChatScreen extends Screen {
     public AiChatScreen() {
         super(Text.literal("Minecraft AI Agent"));
         AiChatHistory.load();
+        AiAgentMemory.load();
         rebuildVisibleHistory();
     }
 
@@ -39,21 +40,22 @@ public final class AiChatScreen extends Screen {
     protected void init() {
         AiClientConfig.load();
         AiChatHistory.load();
+        AiAgentMemory.load();
         rebuildVisibleHistory();
         AiAgentStatus.setListener(status -> {
             MinecraftClient client = MinecraftClient.getInstance();
             client.execute(() -> liveStatus = status == null ? "" : status);
         });
 
-        panelWidth = Math.min(860, width - 24);
-        panelHeight = Math.min(500, height - 24);
+        panelWidth = Math.min(700, width - 32);
+        panelHeight = Math.min(420, height - 32);
         panelLeft = (width - panelWidth) / 2;
         panelTop = (height - panelHeight) / 2;
 
         int keyY = panelTop + 31;
         apiKeyInput = new TextFieldWidget(
                 textRenderer, panelLeft + 14, keyY,
-                panelWidth - 150, 20, Text.literal("API key")
+                panelWidth - 138, 20, Text.literal("API key")
         );
         apiKeyInput.setMaxLength(300);
         apiKeyInput.setText(AiClientConfig.getApiKey());
@@ -61,41 +63,41 @@ public final class AiChatScreen extends Screen {
         addDrawableChild(apiKeyInput);
 
         addDrawableChild(ButtonWidget.builder(
-                        Text.literal("Сохранить key"), button -> saveApiKey())
-                .dimensions(panelLeft + panelWidth - 126, keyY, 112, 20)
+                        Text.literal("Сохранить") , button -> saveApiKey())
+                .dimensions(panelLeft + panelWidth - 112, keyY, 98, 20)
                 .build());
 
         int providerY = panelTop + 57;
         deepSeekButton = addDrawableChild(ButtonWidget.builder(
                         Text.literal("DeepSeek"), button -> selectProvider("deepseek"))
-                .dimensions(panelLeft + 14, providerY, 108, 20)
+                .dimensions(panelLeft + 14, providerY, 100, 20)
                 .build());
 
         groqButton = addDrawableChild(ButtonWidget.builder(
                         Text.literal("Groq"), button -> selectProvider("groq"))
-                .dimensions(panelLeft + 128, providerY, 108, 20)
+                .dimensions(panelLeft + 120, providerY, 100, 20)
                 .build());
 
         openRouterButton = addDrawableChild(ButtonWidget.builder(
                         Text.literal("OpenRouter"), button -> selectProvider("openrouter"))
-                .dimensions(panelLeft + 242, providerY, 108, 20)
+                .dimensions(panelLeft + 226, providerY, 112, 20)
                 .build());
 
         refreshProviderButtons();
 
         testButton = addDrawableChild(ButtonWidget.builder(
-                        Text.literal("Проверить AI"), button -> testConnection())
-                .dimensions(panelLeft + panelWidth - 246, panelTop + 9, 112, 20)
+                        Text.literal("Проверить"), button -> testConnection())
+                .dimensions(panelLeft + panelWidth - 214, panelTop + 9, 98, 20)
                 .build());
 
         clearChatButton = addDrawableChild(ButtonWidget.builder(
                         Text.literal("Очистить"), button -> clearChat())
-                .dimensions(panelLeft + panelWidth - 126, panelTop + 9, 112, 20)
+                .dimensions(panelLeft + panelWidth - 108, panelTop + 9, 94, 20)
                 .build());
 
         int inputY = panelTop + panelHeight - 34;
         messageInput = new TextFieldWidget(textRenderer, panelLeft + 14, inputY,
-                panelWidth - 116, 22, Text.literal("Сообщение"));
+                panelWidth - 112, 22, Text.literal("Сообщение"));
         messageInput.setMaxLength(4000);
         messageInput.setPlaceholder(Text.literal("Напиши, что сделать в Minecraft..."));
         addDrawableChild(messageInput);
@@ -153,14 +155,14 @@ public final class AiChatScreen extends Screen {
         if (waiting) return;
         AiChatHistory.clear();
         rebuildVisibleHistory();
-        messages.add("AI: История чата очищена.");
+        messages.add("AI: История чата очищена. Память не затронута.");
     }
 
     private void testConnection() {
         if (waiting) return;
         saveApiKeySilently();
         if (!AiClientConfig.hasApiKey()) {
-            messages.add("AI: Сначала вставь API key выбранного провайдера и нажми «Сохранить key».");
+            messages.add("AI: Сначала вставь API key выбранного провайдера и нажми «Сохранить».");
             return;
         }
 
@@ -201,7 +203,7 @@ public final class AiChatScreen extends Screen {
         if (message.isEmpty()) return;
 
         if (!AiClientConfig.hasApiKey()) {
-            messages.add("AI: Сначала вставь " + providerDisplayName() + " API key сверху и нажми «Сохранить key».");
+            messages.add("AI: Сначала вставь " + providerDisplayName() + " API key сверху и нажми «Сохранить».");
             return;
         }
 
@@ -279,7 +281,9 @@ public final class AiChatScreen extends Screen {
         int statusColor = waiting ? 0xA0FFA0 : 0xB0B0B8;
         context.drawTextWithShadow(textRenderer, statusText, panelLeft + 14, panelTop + 92, statusColor);
         context.drawTextWithShadow(textRenderer,
-                "Провайдер:", panelLeft + 364, panelTop + 62, 0xC0C0C8);
+                "Провайдер:", panelLeft + 352, panelTop + 62, 0xC0C0C8);
+        context.drawTextWithShadow(textRenderer,
+                "Память: " + AiAgentMemory.count(), panelLeft + panelWidth - 120, panelTop + 92, 0xB0B0B8);
 
         int chatTop = panelTop + 112;
         int chatBottom = panelTop + panelHeight - 46;
