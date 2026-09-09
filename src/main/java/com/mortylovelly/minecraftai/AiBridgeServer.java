@@ -303,13 +303,13 @@ public final class AiBridgeServer {
         return world;
     }
 
-    private static String error(String requestId, String message) {
+    private static JsonObject error(String requestId, String message) {
         JsonObject response = new JsonObject();
         if (requestId == null) response.add("id", JsonNull.INSTANCE);
         else response.addProperty("id", requestId);
         response.addProperty("ok", false);
         response.addProperty("error", message == null ? "Unknown error" : message);
-        return response.toString();
+        return response;
     }
 
     private static JsonObject object(JsonObject object, String name) {
