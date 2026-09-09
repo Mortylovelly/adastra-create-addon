@@ -7,7 +7,7 @@ on:
     branches: [ main ]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -25,6 +25,128 @@ jobs:
 
       - name: Grant Gradle permission
         run: chmod +x gradlew
+
+      - name: Add live AI status events
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java')
+          text = path.read_text(encoding='utf-8')
+          original = text
+
+          text = text.replace(
+              '        System.out.println("[Minecraft AI Agent][" + providerName(provider) + "] TASK START chars=" + message.length());',
+              '        AiAgentStatus.set("Анализирую запрос");\n        System.out.println("[Minecraft AI Agent][" + providerName(provider) + "] TASK START chars=" + message.length());',
+              1
+          )
+
+          text = text.replace(
+              '        return request(DEEPSEEK_URI, AiClientConfig.getDeepSeekApiKey(), payload, "DeepSeek")',
+              '        AiAgentStatus.set("Проверяю подключение к DeepSeek");\n        return request(DEEPSEEK_URI, AiClientConfig.getDeepSeekApiKey(), payload, "DeepSeek")',
+              1
+          )
+
+          text = text.replace(
+              '        return request(uriForProvider(provider), keyForProvider(provider), payload, providerName(provider))',
+              '        AiAgentStatus.set("Проверяю подключение к " + providerName(provider));\n        return request(uriForProvider(provider), keyForProvider(provider), payload, providerName(provider))',
+              1
+          )
+
+          text = text.replace(
+              '        return request(uriForProvider(provider), keyForProvider(provider), payload, providerName(provider))\n                .thenCompose(response -> {',
+              '        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));\n        return request(uriForProvider(provider), keyForProvider(provider), payload, providerName(provider))\n                .thenCompose(response -> {',
+              1
+          )
+
+          text = text.replace(
+              '                    if (toolCalls.isEmpty()) {\n                        String text',
+              '                    if (toolCalls.isEmpty()) {\n                        AiAgentStatus.set("Формирую ответ");\n                        String text',
+              1
+          )
+
+          text = text.replace(
+              '                        validCalls.add(call);\n                        results.add(executeOpenAiToolAsync(call, executedCalls));',
+              '                        validCalls.add(call);\n                        AiAgentStatus.set(statusForTool(toolName(call)));\n                        results.add(executeOpenAiToolAsync(call, executedCalls));',
+              1
+          )
+
+          text = text.replace(
+              '        return request(DEEPSEEK_URI, AiClientConfig.getDeepSeekApiKey(), payload, "DeepSeek")\n                .thenCompose(response -> {',
+              '        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));\n        return request(DEEPSEEK_URI, AiClientConfig.getDeepSeekApiKey(), payload, "DeepSeek")\n                .thenCompose(response -> {',
+              1
+          )
+
+          text = text.replace(
+              '                    if (calls.isEmpty()) {\n                        String text',
+              '                    if (calls.isEmpty()) {\n                        AiAgentStatus.set("Формирую ответ");\n                        String text',
+              1
+          )
+
+          text = text.replace(
+              '                    for (JsonObject call : calls) {\n                        results.add(executeToolWithCache(',
+              '                    for (JsonObject call : calls) {\n                        AiAgentStatus.set(statusForTool(string(call, "name", "unknown")));\n                        results.add(executeToolWithCache(',
+              1
+          )
+
+          text = text.replace(
+              '        System.out.println("[Minecraft AI Agent] TOOL CALL name=" + name + " args=" + compactJson(arguments, 700));',
+              '        AiAgentStatus.set(statusForTool(name));\n        System.out.println("[Minecraft AI Agent] TOOL CALL name=" + name + " args=" + compactJson(arguments, 700));',
+              1
+          )
+
+          text = text.replace(
+              '                JsonObject result = executeTool(server, name, arguments);\n                executedCalls.put(key, result.deepCopy());',
+              '                JsonObject result = executeTool(server, name, arguments);\n                AiAgentStatus.set("Готово: " + statusForTool(name));\n                executedCalls.put(key, result.deepCopy());',
+              1
+          )
+
+          marker = '    private static String toolName(JsonObject call) {'
+          helper = '''    private static String statusForTool(String name) {\n        return switch (name) {\n            case "get_player_state" -> "Получаю позицию игрока";\n            case "get_block" -> "Проверяю блок";\n            case "scan_area" -> "Сканирую область";\n            case "place_blocks" -> "Строю блоки";\n            case "fill_area" -> "Заполняю область";\n            case "break_block" -> "Ломаю блок";\n            case "give_item" -> "Выдаю предмет";\n            default -> "Выполняю действие";\n        };\n    }\n\n'''
+          if 'private static String statusForTool(String name)' not in text:
+              if marker not in text:
+                  raise SystemExit('status helper marker not found')
+              text = text.replace(marker, helper + marker, 1)
+
+          text = text.replace(
+              '                        System.out.println("[Minecraft AI Agent][" + providerName(provider) + "] TASK END rounds=" + round + " toolCalls=" + totalCalls);',
+              '                        AiAgentStatus.clear();\n                        System.out.println("[Minecraft AI Agent][" + providerName(provider) + "] TASK END rounds=" + round + " toolCalls=" + totalCalls);',
+              1
+          )
+
+          text = text.replace(
+              '                        System.out.println("[Minecraft AI Agent][DeepSeek] TASK END rounds=" + round + " toolCalls=" + totalCalls);',
+              '                        AiAgentStatus.clear();\n                        System.out.println("[Minecraft AI Agent][DeepSeek] TASK END rounds=" + round + " toolCalls=" + totalCalls);',
+              1
+          )
+
+          text = text.replace('        return CompletableFuture.completedFuture(text);', '        return CompletableFuture.completedFuture(text);', 1)
+
+          path.write_text(text, encoding='utf-8')
+          print('Live status events injected:', text != original)
+          PY
+
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('gradle.properties')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace('mod_version=0.1.4', 'mod_version=0.1.5')
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Commit instrumentation
+        shell: bash
+        run: |
+          if git diff --quiet -- src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java gradle.properties; then
+            echo "No instrumentation changes needed."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java gradle.properties
+          git commit -m "Add live AI processing status"
+          git push
 
       - name: Build
         run: ./gradlew build --no-daemon
