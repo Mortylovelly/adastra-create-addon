@@ -35,10 +35,8 @@ public final class AiChatScreen extends Screen {
         panelTop = (height - panelHeight) / 2;
 
         int inputY = panelTop + panelHeight - 34;
-        messageInput = new TextFieldWidget(
-                textRenderer, panelLeft + 14, inputY,
-                panelWidth - 116, 22, Text.literal("Сообщение")
-        );
+        messageInput = new TextFieldWidget(textRenderer, panelLeft + 14, inputY,
+                panelWidth - 116, 22, Text.literal("Сообщение"));
         messageInput.setMaxLength(4000);
         messageInput.setPlaceholder(Text.literal("Напиши, что сделать в Minecraft..."));
         addDrawableChild(messageInput);
@@ -49,10 +47,8 @@ public final class AiChatScreen extends Screen {
                 .build());
 
         int keyY = panelTop + 31;
-        apiKeyInput = new TextFieldWidget(
-                textRenderer, panelLeft + 14, keyY,
-                panelWidth - 150, 20, Text.literal("OpenAI API key")
-        );
+        apiKeyInput = new TextFieldWidget(textRenderer, panelLeft + 14, keyY,
+                panelWidth - 150, 20, Text.literal("OpenAI API key"));
         apiKeyInput.setMaxLength(300);
         apiKeyInput.setText(AiClientConfig.getApiKey());
         apiKeyInput.setPlaceholder(Text.literal("Вставь OpenAI API key один раз — он сохранится локально"));
@@ -109,7 +105,7 @@ public final class AiChatScreen extends Screen {
 
     @Override
     public void renderBackground(DrawContext context, int mouseX, int mouseY, float delta) {
-        // No vanilla blur. The world remains sharp behind a translucent overlay.
+        // No vanilla blur. The world stays sharp behind a translucent overlay.
         context.fill(0, 0, width, height, 0x55000000);
     }
 
@@ -122,27 +118,25 @@ public final class AiChatScreen extends Screen {
         context.fill(panelLeft, panelTop + 57, panelLeft + panelWidth, panelTop + 58, 0xFF303038);
 
         context.drawTextWithShadow(textRenderer, title, panelLeft + 14, panelTop + 10, 0xFFFFFF);
-        context.drawTextWithShadow(
-                textRenderer,
+        context.drawTextWithShadow(textRenderer,
                 waiting ? "ИИ выполняет действия в мире..." : "Minecraft AI Agent",
                 panelLeft + 14, panelTop + 62,
-                waiting ? 0xA0FFA0 : 0xB0B0B8
-        );
+                waiting ? 0xA0FFA0 : 0xB0B0B8);
 
         int chatTop = panelTop + 82;
         int chatBottom = panelTop + panelHeight - 46;
         int maxWidth = panelWidth - 28;
         int y = chatBottom;
 
+        outer:
         for (int i = messages.size() - 1; i >= 0; i--) {
             String[] lines = wrap(messages.get(i), maxWidth);
             for (int line = lines.length - 1; line >= 0; line--) {
                 y -= 13;
-                if (y < chatTop) return;
+                if (y < chatTop) break outer;
                 context.drawTextWithShadow(textRenderer, lines[line], panelLeft + 14, y, 0xE8E8E8);
             }
             y -= 7;
-            if (y < chatTop) break;
         }
 
         super.render(context, mouseX, mouseY, delta);
