@@ -45,10 +45,12 @@ public final class AiAgentService {
             .build();
 
     private static final int NETWORK_RETRIES = 2;
+    private static final int MAX_TOOL_ROUNDS = 8;
+    private static final int MAX_CONVERSATION_ITEMS = 10;
 
     private static final String DEEPSEEK_MODEL = "deepseek-v4-flash";
     private static final String GROQ_MODEL = "openai/gpt-oss-20b";
-    private static final String OPENROUTER_MODEL = "openrouter/free";
+    private static final String OPENROUTER_MODEL = "google/gemma-4-26b-a4b-it:free";
 
     private static final String INSTRUCTIONS = """
             You are the AI agent inside a Minecraft 1.21.1 world.
@@ -60,6 +62,10 @@ public final class AiAgentService {
             Do not use Minecraft chat to communicate actions. Your final response is shown in the AI panel.
             Do not perform destructive actions unless the user explicitly requested them.
             Keep tool calls targeted and avoid unnecessary world changes.
+            For any request that changes the world, you MUST use the Minecraft tools; never merely describe how to do it.
+            For building, first call get_player_state once, then use fill_area for large rectangular regions and place_blocks for small details.
+            Prefer the fewest tool calls possible. Do not repeat an identical tool call after it has already succeeded.
+            After the requested action is confirmed by tool results, stop using tools and give a concise final answer.
             """.strip();
 
     private static final List<JsonObject> TOOLS = createTools();
@@ -147,6 +153,7 @@ public final class AiAgentService {
         payload.addProperty("model", DEEPSEEK_MODEL);
         payload.addProperty("instructions", INSTRUCTIONS);
         synchronized (DEEPSEEK_CONVERSATION) {
+            trimConversation(DEEPSEEK_CONVERSATION);
             payload.add("input", DEEPSEEK_CONVERSATION.deepCopy());
         }
         payload.add("tools", deepSeekToolsArray());
@@ -162,6 +169,7 @@ public final class AiAgentService {
         JsonArray messages = new JsonArray();
         messages.add(chatMessage("system", INSTRUCTIONS));
         synchronized (OPENAI_CONVERSATION) {
+            trimConversation(OPENAI_CONVERSATION);
             for (JsonElement element : OPENAI_CONVERSATION) {
                 messages.add(element.deepCopy());
             }
@@ -169,11 +177,12 @@ public final class AiAgentService {
         payload.add("messages", messages);
         payload.add("tools", openAiToolsArray());
         payload.addProperty("tool_choice", "auto");
+        payload.addProperty("max_tokens", 1024);
         return payload;
     }
 
     private static CompletableFuture<String> processDeepSeekResponse(JsonObject response, int depth) {
-        if (depth >= 24) {
+        if (depth >= MAX_TOOL_ROUNDS) {
             return CompletableFuture.completedFuture("ИИ достиг лимита действий для одной задачи.");
         }
 
@@ -225,7 +234,7 @@ public final class AiAgentService {
     }
 
     private static CompletableFuture<String> processOpenAiCompatibleResponse(JsonObject response, int depth) {
-        if (depth >= 24) {
+        if (depth >= MAX_TOOL_ROUNDS) {
             return CompletableFuture.completedFuture("ИИ достиг лимита действий для одной задачи.");
         }
 
@@ -343,6 +352,7 @@ public final class AiAgentService {
             case "get_block" -> getBlock(server, args);
             case "scan_area" -> scanArea(server, args);
             case "place_blocks" -> placeBlocks(server, args);
+            case "fill_area" -> fillArea(server, args);
             case "break_block" -> breakBlock(server, args);
             case "give_item" -> giveItem(server, args);
             default -> throw new IllegalArgumentException("Unknown tool: " + name);
@@ -425,6 +435,54 @@ public final class AiAgentService {
         JsonObject data = new JsonObject();
         data.addProperty("requested", blocks.size());
         data.addProperty("changed", changed);
+        return data;
+    }
+
+    private static JsonObject fillArea(MinecraftServer server, JsonObject args) {
+        ServerWorld world = getWorld(server);
+
+        int x1 = requiredInt(args, "x1");
+        int y1 = requiredInt(args, "y1");
+        int z1 = requiredInt(args, "z1");
+        int x2 = requiredInt(args, "x2");
+        int y2 = requiredInt(args, "y2");
+        int z2 = requiredInt(args, "z2");
+
+        int minX = Math.min(x1, x2);
+        int minY = Math.min(y1, y2);
+        int minZ = Math.min(z1, z2);
+        int maxX = Math.max(x1, x2);
+        int maxY = Math.max(y1, y2);
+        int maxZ = Math.max(z1, z2);
+
+        long volume = (long) (maxX - minX + 1)
+                * (maxY - minY + 1)
+                * (maxZ - minZ + 1);
+        if (volume > 4096) {
+            throw new IllegalArgumentException("fill_area is limited to 4096 blocks per call");
+        }
+
+        Identifier id = Identifier.tryParse(string(args, "block", ""));
+        if (id == null || !Registries.BLOCK.containsId(id)) {
+            throw new IllegalArgumentException("Unknown block: " + string(args, "block", ""));
+        }
+
+        Block block = Registries.BLOCK.get(id);
+        int changed = 0;
+        for (int x = minX; x <= maxX; x++) {
+            for (int y = minY; y <= maxY; y++) {
+                for (int z = minZ; z <= maxZ; z++) {
+                    if (world.setBlockState(new BlockPos(x, y, z), block.getDefaultState())) {
+                        changed++;
+                    }
+                }
+            }
+        }
+
+        JsonObject data = new JsonObject();
+        data.addProperty("requested", volume);
+        data.addProperty("changed", changed);
+        data.addProperty("block", id.toString());
         return data;
     }
 
@@ -586,6 +644,11 @@ public final class AiAgentService {
         )));
         tools.add(function("place_blocks", "Place many blocks at exact overworld coordinates. Maximum 512 blocks per call.", objectProperties(
                 arrayProperty("blocks", "Block placements. Each entry contains x, y, z and a Minecraft block ID such as minecraft:oak_planks.")
+        )));
+        tools.add(function("fill_area", "Fill a rectangular cuboid region with one Minecraft block. Maximum 4096 blocks per call.", objectProperties(
+                intProperty("x1"), intProperty("y1"), intProperty("z1"),
+                intProperty("x2"), intProperty("y2"), intProperty("z2"),
+                property("block", "string", "Minecraft block ID such as minecraft:oak_planks.", true)
         )));
         tools.add(function("break_block", "Break the block at an exact overworld coordinate.", objectProperties(
                 intProperty("x"), intProperty("y"), intProperty("z")
@@ -787,6 +850,12 @@ public final class AiAgentService {
             return error.toString();
         }
         return body.toString();
+    }
+
+    private static void trimConversation(JsonArray conversation) {
+        while (conversation.size() > MAX_CONVERSATION_ITEMS) {
+            conversation.remove(0);
+        }
     }
 
     private static String string(JsonObject object, String name, String fallback) {
