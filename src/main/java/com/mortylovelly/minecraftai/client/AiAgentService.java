@@ -17,6 +17,7 @@ import net.minecraft.util.math.BlockPos;
 
 import java.io.IOException;
 import java.net.ConnectException;
+import java.net.InetAddress;
 import java.net.ProxySelector;
 import java.net.URI;
 import java.net.http.HttpClient;
