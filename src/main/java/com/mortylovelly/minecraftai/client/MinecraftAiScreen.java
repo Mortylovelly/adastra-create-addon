@@ -17,6 +17,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 public final class MinecraftAiScreen extends Screen {
@@ -24,9 +25,9 @@ public final class MinecraftAiScreen extends Screen {
     private static final HttpClient HTTP = HttpClient.newBuilder().build();
 
     private final List<ChatLine> messages = new ArrayList<>();
+    private final String sessionId = UUID.randomUUID().toString();
     private TextFieldWidget input;
     private ButtonWidget sendButton;
-    private int scrollOffset;
     private boolean waitingForReply;
 
     public MinecraftAiScreen() {
@@ -85,9 +86,10 @@ public final class MinecraftAiScreen extends Screen {
         waitingForReply = true;
         sendButton.active = false;
         messages.add(new ChatLine(false, "Думаю и выполняю действия в мире..."));
-        scrollOffset = Integer.MAX_VALUE;
 
-        String body = "{\"message\":" + quoteJson(message) + "}";
+        String body = "{\"message\":" + quoteJson(message)
+                + ",\"session_id\":" + quoteJson(sessionId) + "}";
+
         HttpRequest request = HttpRequest.newBuilder(CHAT_URI)
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body))
@@ -100,9 +102,11 @@ public final class MinecraftAiScreen extends Screen {
                         HttpResponse.BodyHandlers.ofString()
                 );
                 return parseReply(response.statusCode(), response.body());
-            } catch (IOException | InterruptedException exception) {
-                Thread.currentThread().interrupt();
+            } catch (IOException exception) {
                 return "Не удалось подключиться к AI backend: " + exception.getMessage();
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                return "Запрос к AI был прерван.";
             }
         }).thenAccept(reply -> MinecraftClient.getInstance().execute(() -> {
             if (!messages.isEmpty()) {
@@ -112,7 +116,6 @@ public final class MinecraftAiScreen extends Screen {
             waitingForReply = false;
             sendButton.active = true;
             input.setFocused(true);
-            scrollOffset = Integer.MAX_VALUE;
         }));
     }
 
@@ -122,7 +125,9 @@ public final class MinecraftAiScreen extends Screen {
             if (status >= 200 && status < 300) {
                 return json.has("reply") ? json.get("reply").getAsString() : "AI вернул пустой ответ.";
             }
-            return json.has("detail") ? "Ошибка: " + json.get("detail").getAsString() : "Ошибка AI backend: HTTP " + status;
+            return json.has("detail")
+                    ? "Ошибка: " + json.get("detail").getAsString()
+                    : "Ошибка AI backend: HTTP " + status;
         } catch (RuntimeException exception) {
             return "Ошибка AI backend: HTTP " + status;
         }
@@ -154,13 +159,13 @@ public final class MinecraftAiScreen extends Screen {
         context.drawTextWithShadow(textRenderer, title, chatLeft, 12, 0xFFFFFFFF);
         context.drawTextWithShadow(
                 textRenderer,
-                Text.literal("O — открыть/закрыть панель  |  AI получает доступ к миру только через разрешённые инструменты"),
+                Text.literal("O — открыть/закрыть | команды выполняются прямо в мире, без игрового чата"),
                 chatLeft,
                 panelTop - 15,
                 0xFFAAAAAA
         );
 
-        int y = panelBottom - 10 + scrollOffset;
+        int y = panelBottom - 10;
         for (int i = messages.size() - 1; i >= 0; i--) {
             ChatLine line = messages.get(i);
             List<OrderedText> wrapped = textRenderer.wrapLines(
@@ -168,10 +173,15 @@ public final class MinecraftAiScreen extends Screen {
                     chatWidth
             );
             for (int j = wrapped.size() - 1; j >= 0; j--) {
-                OrderedText ordered = wrapped.get(j);
                 y -= textRenderer.fontHeight + 3;
                 if (y >= panelTop + 8 && y <= panelBottom - 4) {
-                    context.drawTextWithShadow(textRenderer, ordered, chatLeft, y, line.user ? 0xFFFFFFFF : 0xFFD6E7FF);
+                    context.drawTextWithShadow(
+                            textRenderer,
+                            wrapped.get(j),
+                            chatLeft,
+                            y,
+                            line.user ? 0xFFFFFFFF : 0xFFD6E7FF
+                    );
                 }
             }
             y -= 7;
