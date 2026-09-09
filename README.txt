@@ -1,46 +1,63 @@
+# Minecraft AI Agent
 
-Source installation information for modders
--------------------------------------------
-This code follows the Minecraft Forge installation methodology. It will apply
-some small patches to the vanilla MCP source code, giving you and it access 
-to some of the data and functions you need to build a successful mod.
+Minecraft AI Agent is a Fabric 1.21.1 mod plus a local Python bridge that lets an AI model inspect and control a Minecraft world through explicit tools.
 
-Note also that the patches are built against "un-renamed" MCP source code (aka
-SRG Names) - this means that you will not be able to read them directly against
-normal code.
+## Current architecture
 
-Setup Process:
-==============================
+Minecraft mod -> local TCP bridge (`127.0.0.1:8765`) -> Python backend -> OpenAI Responses API -> browser chat (`127.0.0.1:8787`)
 
-Step 1: Open your command-line and browse to the folder where you extracted the zip file.
+The Minecraft side currently exposes:
 
-Step 2: You're left with a choice.
-If you prefer to use Eclipse:
-1. Run the following command: `./gradlew genEclipseRuns`
-2. Open Eclipse, Import > Existing Gradle Project > Select Folder 
-   or run `gradlew eclipse` to generate the project.
+- `get_player_state`
+- `get_block`
+- `scan_area`
+- `place_block`
+- `break_block`
+- `move_to` (prototype teleport tool)
+- `send_chat`
 
-If you prefer to use IntelliJ:
-1. Open IDEA, and import project.
-2. Select your build.gradle file and have it import.
-3. Run the following command: `./gradlew genIntellijRuns`
-4. Refresh the Gradle Project in IDEA if required.
+The browser UI is intentionally simple for the first version. The tool system is the important base; pathfinding, inventory, containers, crafting, entities, screenshots and persistent memory will be added on top of it.
 
-If at any point you are missing libraries in your IDE, or you've run into problems you can 
-run `gradlew --refresh-dependencies` to refresh the local cache. `gradlew clean` to reset everything 
-(this does not affect your code) and then start the process again.
+## Minecraft project
 
-Mapping Names:
-=============================
-By default, the MDK is configured to use the official mapping names from Mojang for methods and fields 
-in the Minecraft codebase. These names are covered by a specific license. All modders should be aware of this
-license, if you do not agree with it you can change your mapping names to other crowdsourced names in your 
-build.gradle. For the latest license text, refer to the mapping file itself, or the reference copy here:
-https://github.com/MinecraftForge/MCPConfig/blob/master/Mojang.md
+Minecraft 1.21.1
+Fabric Loader 0.19.3
+Fabric API 0.116.15+1.21.1
+Java 21
+Fabric Loom 1.9.2
+Gradle 8.12
 
-Additional Resources: 
-=========================
-Community Documentation: https://docs.minecraftforge.net/en/1.20.1/gettingstarted/
-LexManos' Install Video: https://youtu.be/8VEdtQLuLO0
-Forge Forums: https://forums.minecraftforge.net/
-Forge Discord: https://discord.minecraftforge.net/
+Build locally with:
+
+```text
+./gradlew build --no-daemon
+```
+
+In Minecraft, `/aiagent status` reports whether the local bridge has a client connected.
+
+## Python backend
+
+From `backend/`:
+
+```text
+python -m venv .venv
+.venv\\Scripts\\activate
+pip install -r requirements.txt
+copy .env.example .env
+```
+
+Put your OpenAI API key in `.env`. The backend defaults to `gpt-5.6-luna`, but the model can be changed with `OPENAI_MODEL`.
+
+Start the web server:
+
+```text
+python -m uvicorn main:app --host 127.0.0.1 --port 8787
+```
+
+Then open `http://127.0.0.1:8787/`.
+
+Never put the OpenAI API key into the Minecraft mod jar or commit `.env`.
+
+## Security note
+
+The bridge listens only on the local loopback interface. Tool access is explicit and can be restricted further as the agent grows. Irreversible or dangerous Minecraft operations should not be exposed without an explicit permission layer.
