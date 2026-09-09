@@ -19,6 +19,8 @@ public final class AiChatScreen extends Screen {
     private ButtonWidget deepSeekButton;
     private ButtonWidget groqButton;
     private ButtonWidget openRouterButton;
+    private ButtonWidget testButton;
+    private ButtonWidget clearChatButton;
     private boolean waiting;
     private int panelLeft;
     private int panelTop;
@@ -27,12 +29,15 @@ public final class AiChatScreen extends Screen {
 
     public AiChatScreen() {
         super(Text.literal("Minecraft AI Agent"));
-        messages.add("AI: Я готов. Напиши, что сделать в мире.");
+        AiChatHistory.load();
+        rebuildVisibleHistory();
     }
 
     @Override
     protected void init() {
         AiClientConfig.load();
+        AiChatHistory.load();
+        rebuildVisibleHistory();
 
         panelWidth = Math.min(860, width - 24);
         panelHeight = Math.min(500, height - 24);
@@ -46,7 +51,7 @@ public final class AiChatScreen extends Screen {
         );
         apiKeyInput.setMaxLength(300);
         apiKeyInput.setText(AiClientConfig.getApiKey());
-        apiKeyInput.setPlaceholder(Text.literal("Вставь API key выбранного провайдера — он сохранится локально"));
+        apiKeyInput.setPlaceholder(Text.literal("API key выбранного провайдера — сохраняется локально"));
         addDrawableChild(apiKeyInput);
 
         addDrawableChild(ButtonWidget.builder(
@@ -72,6 +77,16 @@ public final class AiChatScreen extends Screen {
 
         refreshProviderButtons();
 
+        testButton = addDrawableChild(ButtonWidget.builder(
+                        Text.literal("Проверить AI"), button -> testConnection())
+                .dimensions(panelLeft + panelWidth - 246, panelTop + 9, 112, 20)
+                .build());
+
+        clearChatButton = addDrawableChild(ButtonWidget.builder(
+                        Text.literal("Очистить"), button -> clearChat())
+                .dimensions(panelLeft + panelWidth - 126, panelTop + 9, 112, 20)
+                .build());
+
         int inputY = panelTop + panelHeight - 34;
         messageInput = new TextFieldWidget(textRenderer, panelLeft + 14, inputY,
                 panelWidth - 116, 22, Text.literal("Сообщение"));
@@ -84,12 +99,19 @@ public final class AiChatScreen extends Screen {
                 .dimensions(panelLeft + panelWidth - 92, inputY, 78, 22)
                 .build());
 
-        addDrawableChild(ButtonWidget.builder(
-                        Text.literal("Проверить AI"), button -> testConnection())
-                .dimensions(panelLeft + panelWidth - 126, panelTop + 9, 112, 20)
-                .build());
-
         setInitialFocus(messageInput);
+    }
+
+    private void rebuildVisibleHistory() {
+        messages.clear();
+        List<AiChatHistory.Entry> history = AiChatHistory.getAll();
+        if (history.isEmpty()) {
+            messages.add("AI: Я готов. Напиши, что сделать в мире.");
+            return;
+        }
+        for (AiChatHistory.Entry entry : history) {
+            messages.add((entry.role().equals("user") ? "Ты: " : "AI: ") + entry.text());
+        }
     }
 
     private void selectProvider(String provider) {
@@ -121,6 +143,13 @@ public final class AiChatScreen extends Screen {
                 : "AI: API key очищен.");
     }
 
+    private void clearChat() {
+        if (waiting) return;
+        AiChatHistory.clear();
+        rebuildVisibleHistory();
+        messages.add("AI: История чата очищена.");
+    }
+
     private void testConnection() {
         if (waiting) return;
         saveApiKeySilently();
@@ -130,17 +159,23 @@ public final class AiChatScreen extends Screen {
         }
 
         waiting = true;
+        if (testButton != null) testButton.active = false;
+        if (clearChatButton != null) clearChatButton.active = false;
         String provider = providerDisplayName();
         messages.add("AI: Проверяю подключение к " + provider + "...");
         AiAgentService.testConnection().handle((ok, throwable) -> {
             MinecraftClient client = MinecraftClient.getInstance();
             client.execute(() -> {
                 waiting = false;
+                if (testButton != null) testButton.active = true;
+                if (clearChatButton != null) clearChatButton.active = true;
                 if (throwable != null) {
-                    Throwable cause = throwable.getCause() != null ? throwable.getCause() : throwable;
+                    Throwable cause = deepestCause(throwable);
                     messages.add("AI: Ошибка: " + (cause.getMessage() == null ? cause.toString() : cause.getMessage()));
                 } else {
-                    messages.add(ok ? "AI: " + provider + " подключён и отвечает." : "AI: " + provider + " не вернул ожидаемый ответ.");
+                    messages.add(ok
+                            ? "AI: " + provider + " подключён и отвечает."
+                            : "AI: " + provider + " не вернул ожидаемый ответ.");
                 }
             });
             return null;
@@ -160,9 +195,12 @@ public final class AiChatScreen extends Screen {
         }
 
         messages.add("Ты: " + message);
+        AiChatHistory.add("user", message);
         messageInput.setText("");
         waiting = true;
         sendButton.active = false;
+        if (testButton != null) testButton.active = false;
+        if (clearChatButton != null) clearChatButton.active = false;
 
         CompletableFuture<String> future = AiAgentService.chat(message);
         future.handle((reply, throwable) -> {
@@ -170,16 +208,33 @@ public final class AiChatScreen extends Screen {
             client.execute(() -> {
                 waiting = false;
                 if (sendButton != null) sendButton.active = true;
+                if (testButton != null) testButton.active = true;
+                if (clearChatButton != null) clearChatButton.active = true;
 
                 if (throwable != null) {
-                    Throwable cause = throwable.getCause() != null ? throwable.getCause() : throwable;
-                    messages.add("AI: Ошибка: " + (cause.getMessage() == null ? cause.toString() : cause.getMessage()));
+                    Throwable cause = deepestCause(throwable);
+                    String error = cause.getMessage() == null ? cause.toString() : cause.getMessage();
+                    messages.add("AI: Ошибка: " + error);
+                    AiChatHistory.add("assistant", "Ошибка: " + error);
                 } else {
-                    messages.add("AI: " + reply);
+                    String finalReply = reply == null || reply.isBlank()
+                            ? "Я не получил текстового ответа."
+                            : reply;
+                    messages.add("AI: " + finalReply);
+                    AiChatHistory.add("assistant", finalReply);
                 }
             });
             return null;
         });
+    }
+
+    private static Throwable deepestCause(Throwable throwable) {
+        Throwable current = throwable;
+        int depth = 0;
+        while (current.getCause() != null && current.getCause() != current && depth++ < 16) {
+            current = current.getCause();
+        }
+        return current;
     }
 
     private String providerDisplayName() {
@@ -192,7 +247,7 @@ public final class AiChatScreen extends Screen {
 
     @Override
     public void renderBackground(DrawContext context, int mouseX, int mouseY, float delta) {
-        context.fill(0, 0, width, height, 0x55000000);
+        context.fill(0, 0, width, height, 0x66000000);
     }
 
     @Override
