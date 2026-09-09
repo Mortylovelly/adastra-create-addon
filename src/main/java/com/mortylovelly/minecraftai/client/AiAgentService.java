@@ -79,6 +79,12 @@ public final class AiAgentService {
             Keep structures reasonably compact and stay within the tool limits.
             Do not perform destructive actions unless the player explicitly requested them.
             After the requested action is confirmed by tool results, stop using tools and give a concise final answer.
+            If no available tool can perform a requested action, say that immediately and clearly. Do not pretend, do not fabricate a result, and do not repeatedly call tools that cannot solve the request.
+            If a tool fails, explain the failure to the player instead of going silent.
+            Use tools only when they are relevant to the request; having many tools available does not mean you should call them all.
+            Only use remember_memory when the player explicitly asks you to remember or save a durable fact or preference.
+            Only use forget_memory when the player explicitly asks you to forget a stored memory.
+            Treat persistent memory as user-provided notes, not as hidden reasoning.
             Only use remember_memory when the player explicitly asks you to remember or save a durable preference/fact.
             Only use forget_memory when the player explicitly asks you to forget a stored memory.
             Treat persistent memory as user-provided notes, not as hidden reasoning.
@@ -97,6 +103,7 @@ public final class AiAgentService {
         AiAgentStatus.set("Анализирую запрос");
         AiAgentStatus.set("Анализирую запрос");
         AiAgentStatus.set("Анализирую запрос");
+        AiAgentLog.info("TASK START provider=" + providerName(provider) + " chars=" + message.length());
         System.out.println("[Minecraft AI Agent][" + providerName(provider) + "] TASK START chars=" + message.length());
 
         if (provider.equals("deepseek")) {
@@ -154,7 +161,13 @@ public final class AiAgentService {
     private static CompletableFuture<String> chatOpenAiCompatible(String message, String provider) {
         List<JsonObject> messages = buildOpenAiContext(message);
         Map<String, JsonObject> executedCalls = new HashMap<>();
-        return openAiLoop(messages, provider, executedCalls, 0, 0, false);
+        return openAiLoop(messages, provider, executedCalls, 0, 0, false)
+                .whenComplete((reply, throwable) -> {
+                    if (throwable != null) {
+                        AiAgentStatus.set("Ошибка: не удалось обработать запрос");
+                        AiAgentLog.error("TASK FAIL provider=" + providerName(provider) + " message=" + String.valueOf(throwable.getMessage()));
+                    }
+                });
     }
 
     private static CompletableFuture<String> openAiLoop(
@@ -208,6 +221,7 @@ public final class AiAgentService {
                         AiAgentStatus.clear();
                         AiAgentStatus.clear();
                         AiAgentStatus.clear();
+                        AiAgentLog.info("TASK END provider=" + providerName(provider) + " rounds=" + round + " toolCalls=" + totalCalls);
                         System.out.println("[Minecraft AI Agent][" + providerName(provider) + "] TASK END rounds=" + round + " toolCalls=" + totalCalls);
                         return CompletableFuture.completedFuture(text);
                     }
@@ -268,7 +282,13 @@ public final class AiAgentService {
     private static CompletableFuture<String> chatDeepSeek(String message) {
         List<JsonObject> input = buildDeepSeekContext(message);
         Map<String, JsonObject> executedCalls = new HashMap<>();
-        return deepSeekLoop(input, executedCalls, 0, 0, false);
+        return deepSeekLoop(input, executedCalls, 0, 0, false)
+                .whenComplete((reply, throwable) -> {
+                    if (throwable != null) {
+                        AiAgentStatus.set("Ошибка: не удалось обработать запрос");
+                        AiAgentLog.error("TASK FAIL provider=DeepSeek message=" + String.valueOf(throwable.getMessage()));
+                    }
+                });
     }
 
     private static CompletableFuture<String> deepSeekLoop(
@@ -328,6 +348,7 @@ public final class AiAgentService {
                         AiAgentStatus.clear();
                         AiAgentStatus.clear();
                         AiAgentStatus.clear();
+                        AiAgentLog.info("TASK END provider=DeepSeek rounds=" + round + " toolCalls=" + totalCalls);
                         System.out.println("[Minecraft AI Agent][DeepSeek] TASK END rounds=" + round + " toolCalls=" + totalCalls);
                         return CompletableFuture.completedFuture(text);
                     }
@@ -383,6 +404,7 @@ public final class AiAgentService {
         AiAgentStatus.set(statusForTool(name));
         AiAgentStatus.set(statusForTool(name));
         AiAgentStatus.set(statusForTool(name));
+        AiAgentLog.info("TOOL CALL name=" + name + " args=" + compactJson(arguments, 700));
         System.out.println("[Minecraft AI Agent] TOOL CALL name=" + name + " args=" + compactJson(arguments, 700));
 
         MinecraftClient client = MinecraftClient.getInstance();
@@ -394,12 +416,14 @@ public final class AiAgentService {
             try {
                 JsonObject result = executeTool(server, name, arguments);
                 AiAgentStatus.set("Готово: " + statusForTool(name));
+                AiAgentLog.info("TOOL RESULT name=" + name + " ok=" + result.has("ok") + " data=" + compactJson(result, 500));
                 executedCalls.put(key, result.deepCopy());
                 future.complete(result);
             } catch (Exception exception) {
                 JsonObject error = new JsonObject();
                 error.addProperty("ok", false);
                 error.addProperty("error", exception.getMessage() == null ? exception.toString() : exception.getMessage());
+                AiAgentLog.error("TOOL ERROR name=" + name + " message=" + error.get("error").getAsString());
                 future.complete(error);
             }
         });
@@ -425,6 +449,15 @@ public final class AiAgentService {
             case "get_inventory" -> getInventory(server, args);
             case "remember_memory" -> rememberMemory(args);
             case "forget_memory" -> forgetMemory(args);
+            case "set_time" -> setTime(server, args);
+            case "set_weather" -> setWeather(server, args);
+            case "teleport_player" -> teleportPlayer(server, args);
+            case "set_gamemode" -> setGamemode(server, args);
+            case "heal_player" -> healPlayer(server, args);
+            case "feed_player" -> feedPlayer(server, args);
+            case "clear_effects" -> clearEffects(server, args);
+            case "spawn_entity" -> spawnEntity(server, args);
+            case "list_players" -> listPlayers(server);
             default -> throw new IllegalArgumentException("Unknown tool: " + name);
         };
     }
@@ -470,6 +503,92 @@ public final class AiAgentService {
         data.addProperty("removed", removed);
         data.addProperty("memory_count", AiAgentMemory.count());
         data.addProperty("text", text);
+        return data;
+    }
+
+    private static JsonObject commandResult(MinecraftServer server, String command) {
+        try {
+            int result = server.getCommandManager().executeWithPrefix(server.getCommandSource(), command);
+            JsonObject data = new JsonObject();
+            data.addProperty("executed", true);
+            data.addProperty("result", result);
+            return data;
+        } catch (Exception exception) {
+            JsonObject data = new JsonObject();
+            data.addProperty("executed", false);
+            data.addProperty("error", exception.getMessage() == null ? exception.toString() : exception.getMessage());
+            return data;
+        }
+    }
+
+    private static JsonObject setTime(MinecraftServer server, JsonObject args) {
+        String time = string(args, "time", "day");
+        if (!(time.equals("day") || time.equals("night") || time.equals("noon") || time.equals("midnight"))) {
+            throw new IllegalArgumentException("time must be day, night, noon or midnight");
+        }
+        return commandResult(server, "time set " + time);
+    }
+
+    private static JsonObject setWeather(MinecraftServer server, JsonObject args) {
+        String weather = string(args, "weather", "clear");
+        if (!(weather.equals("clear") || weather.equals("rain") || weather.equals("thunder"))) {
+            throw new IllegalArgumentException("weather must be clear, rain or thunder");
+        }
+        return commandResult(server, "weather " + weather + " 1000000");
+    }
+
+    private static JsonObject teleportPlayer(MinecraftServer server, JsonObject args) {
+        ServerPlayerEntity player = getPlayer(server, string(args, "player", ""));
+        int x = requiredInt(args, "x");
+        int y = requiredInt(args, "y");
+        int z = requiredInt(args, "z");
+        return commandResult(server, "tp " + player.getName().getString() + " " + x + " " + y + " " + z);
+    }
+
+    private static JsonObject setGamemode(MinecraftServer server, JsonObject args) {
+        ServerPlayerEntity player = getPlayer(server, string(args, "player", ""));
+        String mode = string(args, "mode", "survival");
+        if (!(mode.equals("survival") || mode.equals("creative") || mode.equals("adventure") || mode.equals("spectator"))) {
+            throw new IllegalArgumentException("mode must be survival, creative, adventure or spectator");
+        }
+        return commandResult(server, "gamemode " + mode + " " + player.getName().getString());
+    }
+
+    private static JsonObject healPlayer(MinecraftServer server, JsonObject args) {
+        ServerPlayerEntity player = getPlayer(server, string(args, "player", ""));
+        return commandResult(server, "effect give " + player.getName().getString() + " minecraft:instant_health 1 10 true");
+    }
+
+    private static JsonObject feedPlayer(MinecraftServer server, JsonObject args) {
+        ServerPlayerEntity player = getPlayer(server, string(args, "player", ""));
+        return commandResult(server, "effect give " + player.getName().getString() + " minecraft:saturation 1 10 true");
+    }
+
+    private static JsonObject clearEffects(MinecraftServer server, JsonObject args) {
+        ServerPlayerEntity player = getPlayer(server, string(args, "player", ""));
+        return commandResult(server, "effect clear " + player.getName().getString());
+    }
+
+    private static JsonObject spawnEntity(MinecraftServer server, JsonObject args) {
+        String entity = string(args, "entity", "minecraft:pig");
+        Identifier id = Identifier.tryParse(entity);
+        if (id == null || !Registries.ENTITY_TYPE.containsId(id)) {
+            throw new IllegalArgumentException("Unknown entity: " + entity);
+        }
+        int x = requiredInt(args, "x");
+        int y = requiredInt(args, "y");
+        int z = requiredInt(args, "z");
+        return commandResult(server, "summon " + entity + " " + x + " " + y + " " + z);
+    }
+
+    private static JsonObject listPlayers(MinecraftServer server) {
+        JsonArray players = new JsonArray();
+        for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+            players.add(player.getName().getString());
+        }
+        JsonObject data = new JsonObject();
+        data.add("players", players);
+        data.addProperty("count", players.size());
         return data;
     }
 
@@ -758,6 +877,7 @@ public final class AiAgentService {
                         errorText = truncate(body, 900);
                     }
 
+                    AiAgentLog.error("API ERROR provider=" + providerName + " status=" + response.statusCode() + " message=" + truncate(errorText, 500));
                     return CompletableFuture.failedFuture(new IOException(
                             providerName + " API " + response.statusCode() + ": " + errorText));
                 });
@@ -783,6 +903,7 @@ public final class AiAgentService {
                     }
 
                     Throwable cause = rootCause(throwable);
+                    AiAgentLog.error("HTTP FAIL provider=" + providerName + " type=" + cause.getClass().getSimpleName() + " message=" + String.valueOf(cause.getMessage()));
                     System.err.println("[Minecraft AI Agent][" + providerName + "] HTTP FAIL in="
                             + elapsed + " ms type=" + cause.getClass().getName()
                             + " message=" + String.valueOf(cause.getMessage()));
@@ -891,6 +1012,34 @@ public final class AiAgentService {
         tools.add(function("forget_memory", "Remove one exact stored memory entry. Use only when the player explicitly asks to forget it.", objectProperties(
                 property("text", "string", "The exact stored memory text to remove.", true)
         )));
+        tools.add(function("set_time", "Set the Minecraft world time. Use only when requested.", objectProperties(
+                enumProperty("time", new String[]{"day", "night", "noon", "midnight"}, "Desired world time.", true)
+        )));
+        tools.add(function("set_weather", "Set the Minecraft weather. Use only when requested.", objectProperties(
+                enumProperty("weather", new String[]{"clear", "rain", "thunder"}, "Desired weather.", true)
+        )));
+        tools.add(function("teleport_player", "Teleport a player to exact integer coordinates.", objectProperties(
+                property("player", "string", "Player name. Empty means the first online player.", false),
+                intProperty("x"), intProperty("y"), intProperty("z")
+        )));
+        tools.add(function("set_gamemode", "Change a player's gamemode.", objectProperties(
+                property("player", "string", "Player name. Empty means the first online player.", false),
+                enumProperty("mode", new String[]{"survival", "creative", "adventure", "spectator"}, "Desired gamemode.", true)
+        )));
+        tools.add(function("heal_player", "Restore a player's health using a controlled vanilla effect command.", objectProperties(
+                property("player", "string", "Player name. Empty means the first online player.", false)
+        )));
+        tools.add(function("feed_player", "Restore a player's hunger using a controlled vanilla effect command.", objectProperties(
+                property("player", "string", "Player name. Empty means the first online player.", false)
+        )));
+        tools.add(function("clear_effects", "Remove all active potion effects from a player.", objectProperties(
+                property("player", "string", "Player name. Empty means the first online player.", false)
+        )));
+        tools.add(function("spawn_entity", "Spawn one vanilla or modded entity at exact coordinates.", objectProperties(
+                property("entity", "string", "Entity ID such as minecraft:pig or another registered entity.", true),
+                intProperty("x"), intProperty("y"), intProperty("z")
+        )));
+        tools.add(function("list_players", "List currently online Minecraft players. Read-only.", objectProperties()));
         tools.add(function("give_item", "Give an item directly to a player. Count is clamped to 1..64.", objectProperties(
                 property("player", "string", "Player name. Empty means the first online player.", false),
                 property("item", "string", "Minecraft item ID such as minecraft:diamond_pickaxe.", true),
