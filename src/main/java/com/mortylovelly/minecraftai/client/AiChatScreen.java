@@ -22,6 +22,8 @@ public final class AiChatScreen extends Screen {
     private ButtonWidget testButton;
     private ButtonWidget clearChatButton;
     private boolean waiting;
+    private String liveStatus = "";
+    private long statusAnimationTick;
     private int panelLeft;
     private int panelTop;
     private int panelWidth;
@@ -38,6 +40,10 @@ public final class AiChatScreen extends Screen {
         AiClientConfig.load();
         AiChatHistory.load();
         rebuildVisibleHistory();
+        AiAgentStatus.setListener(status -> {
+            MinecraftClient client = MinecraftClient.getInstance();
+            client.execute(() -> liveStatus = status == null ? "" : status);
+        });
 
         panelWidth = Math.min(860, width - 24);
         panelHeight = Math.min(500, height - 24);
@@ -159,16 +165,21 @@ public final class AiChatScreen extends Screen {
         }
 
         waiting = true;
+        liveStatus = "Подключаюсь к " + providerDisplayName() + "...";
+        statusAnimationTick = 0;
         if (testButton != null) testButton.active = false;
         if (clearChatButton != null) clearChatButton.active = false;
+        if (sendButton != null) sendButton.active = false;
         String provider = providerDisplayName();
         messages.add("AI: Проверяю подключение к " + provider + "...");
         AiAgentService.testConnection().handle((ok, throwable) -> {
             MinecraftClient client = MinecraftClient.getInstance();
             client.execute(() -> {
                 waiting = false;
+                liveStatus = "";
                 if (testButton != null) testButton.active = true;
                 if (clearChatButton != null) clearChatButton.active = true;
+                if (sendButton != null) sendButton.active = true;
                 if (throwable != null) {
                     Throwable cause = deepestCause(throwable);
                     messages.add("AI: Ошибка: " + (cause.getMessage() == null ? cause.toString() : cause.getMessage()));
@@ -198,6 +209,8 @@ public final class AiChatScreen extends Screen {
         AiChatHistory.add("user", message);
         messageInput.setText("");
         waiting = true;
+        liveStatus = "Анализирую запрос...";
+        statusAnimationTick = 0;
         sendButton.active = false;
         if (testButton != null) testButton.active = false;
         if (clearChatButton != null) clearChatButton.active = false;
@@ -207,6 +220,7 @@ public final class AiChatScreen extends Screen {
             MinecraftClient client = MinecraftClient.getInstance();
             client.execute(() -> {
                 waiting = false;
+                liveStatus = "";
                 if (sendButton != null) sendButton.active = true;
                 if (testButton != null) testButton.active = true;
                 if (clearChatButton != null) clearChatButton.active = true;
@@ -259,11 +273,11 @@ public final class AiChatScreen extends Screen {
         context.fill(panelLeft, panelTop + 82, panelLeft + panelWidth, panelTop + 83, 0xFF303038);
 
         context.drawTextWithShadow(textRenderer, title, panelLeft + 14, panelTop + 10, 0xFFFFFF);
-        context.drawTextWithShadow(textRenderer,
-                waiting ? "ИИ выполняет действия в мире..." : providerDisplayName() + " AI Agent",
-                panelLeft + 14, panelTop + 92,
-                waiting ? 0xA0FFA0 : 0xB0B0B8
-        );
+        String statusText = waiting
+                ? buildAnimatedStatus()
+                : providerDisplayName() + " AI Agent";
+        int statusColor = waiting ? 0xA0FFA0 : 0xB0B0B8;
+        context.drawTextWithShadow(textRenderer, statusText, panelLeft + 14, panelTop + 92, statusColor);
         context.drawTextWithShadow(textRenderer,
                 "Провайдер:", panelLeft + 364, panelTop + 62, 0xC0C0C8);
 
@@ -284,6 +298,15 @@ public final class AiChatScreen extends Screen {
         }
 
         super.render(context, mouseX, mouseY, delta);
+    }
+
+    private String buildAnimatedStatus() {
+        statusAnimationTick++;
+        String base = liveStatus == null || liveStatus.isBlank()
+                ? "ИИ работает..."
+                : liveStatus;
+        String[] dots = {"", ".", "..", "..."};
+        return "● " + base + dots[(int) ((statusAnimationTick / 8) % dots.length)];
     }
 
     private String[] wrap(String text, int maxWidth) {
@@ -321,6 +344,7 @@ public final class AiChatScreen extends Screen {
 
     @Override
     public void close() {
+        AiAgentStatus.clearListener();
         MinecraftClient.getInstance().setScreen(null);
     }
 }
