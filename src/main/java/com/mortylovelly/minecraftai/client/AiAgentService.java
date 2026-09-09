@@ -16,22 +16,29 @@ import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 
 import java.io.IOException;
+import java.net.ConnectException;
+import java.net.ProxySelector;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 public final class AiAgentService {
     private static final URI DEEPSEEK_URI = URI.create("https://api.deepseek.com/responses");
     private static final URI GROQ_URI = URI.create("https://api.groq.com/openai/v1/chat/completions");
     private static final HttpClient HTTP = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(10))
+            .connectTimeout(Duration.ofSeconds(20))
+            .version(HttpClient.Version.HTTP_1_1)
+            .proxy(ProxySelector.getDefault())
             .build();
+    private static final int NETWORK_RETRIES = 2;
 
     private static final String DEEPSEEK_MODEL = "deepseek-v4-flash";
     private static final String GROQ_MODEL = "openai/gpt-oss-20b";
@@ -581,7 +588,7 @@ public final class AiAgentService {
                 .POST(HttpRequest.BodyPublishers.ofString(payload.toString(), StandardCharsets.UTF_8))
                 .build();
 
-        return HTTP.sendAsync(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
+        return sendWithRetry(request, providerName, 0)
                 .thenCompose(response -> {
                     try {
                         JsonObject body = JsonParser.parseString(response.body()).getAsJsonObject();
@@ -597,6 +604,32 @@ public final class AiAgentService {
                         ));
                     }
                 });
+    }
+
+    private static CompletableFuture<HttpResponse<String>> sendWithRetry(
+            HttpRequest request, String providerName, int attempt) {
+        return HTTP.sendAsync(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
+                .handle((response, throwable) -> {
+                    if (throwable == null) {
+                        return CompletableFuture.completedFuture(response);
+                    }
+
+                    Throwable cause = throwable.getCause() != null ? throwable.getCause() : throwable;
+                    boolean retryable = cause instanceof ConnectException
+                            || cause instanceof HttpTimeoutException;
+
+                    if (!retryable || attempt >= NETWORK_RETRIES) {
+                        return CompletableFuture.<HttpResponse<String>>failedFuture(
+                                new IOException(providerName + " connection failed: " + cause.getMessage(), cause));
+                    }
+
+                    long delay = 2L * (attempt + 1);
+                    return CompletableFuture.supplyAsync(
+                            () -> null,
+                            CompletableFuture.delayedExecutor(delay, TimeUnit.SECONDS))
+                            .thenCompose(ignored -> sendWithRetry(request, providerName, attempt + 1));
+                })
+                .thenCompose(future -> future);
     }
 
     private static JsonObject deepSeekMessage(String content) {
