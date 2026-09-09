@@ -79,6 +79,9 @@ public final class AiAgentService {
             Keep structures reasonably compact and stay within the tool limits.
             Do not perform destructive actions unless the player explicitly requested them.
             After the requested action is confirmed by tool results, stop using tools and give a concise final answer.
+            Only use remember_memory when the player explicitly asks you to remember or save a durable preference/fact.
+            Only use forget_memory when the player explicitly asks you to forget a stored memory.
+            Treat persistent memory as user-provided notes, not as hidden reasoning.
             """.strip();
 
     private AiAgentService() {}
@@ -89,6 +92,7 @@ public final class AiAgentService {
             return CompletableFuture.completedFuture("Сначала укажи " + providerName(provider) + " API key в поле сверху.");
         }
 
+        AiAgentStatus.set("Анализирую запрос");
         AiAgentStatus.set("Анализирую запрос");
         AiAgentStatus.set("Анализирую запрос");
         AiAgentStatus.set("Анализирую запрос");
@@ -113,6 +117,7 @@ public final class AiAgentService {
             AiAgentStatus.set("Проверяю подключение к DeepSeek");
         AiAgentStatus.set("Проверяю подключение к DeepSeek");
         AiAgentStatus.set("Проверяю подключение к DeepSeek");
+        AiAgentStatus.set("Проверяю подключение к DeepSeek");
         return request(DEEPSEEK_URI, AiClientConfig.getDeepSeekApiKey(), payload, "DeepSeek")
                     .thenApply(root -> root.has("output_text")
                             && !root.get("output_text").isJsonNull()
@@ -128,6 +133,7 @@ public final class AiAgentService {
         payload.addProperty("temperature", 0);
         payload.addProperty("max_tokens", 32);
 
+        AiAgentStatus.set("Проверяю подключение к " + providerName(provider));
         AiAgentStatus.set("Проверяю подключение к " + providerName(provider));
         AiAgentStatus.set("Проверяю подключение к " + providerName(provider));
         AiAgentStatus.set("Проверяю подключение к " + providerName(provider));
@@ -172,6 +178,7 @@ public final class AiAgentService {
             payload.add("messages", array);
         }
 
+        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
         AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
         AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
         AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
@@ -269,7 +276,7 @@ public final class AiAgentService {
 
         JsonObject payload = new JsonObject();
         payload.addProperty("model", DEEPSEEK_MODEL);
-        payload.addProperty("instructions", INSTRUCTIONS);
+        payload.addProperty("instructions", INSTRUCTIONS + "\n\nPersistent memory:\n" + AiAgentMemory.forPrompt());
         JsonArray inputArray = new JsonArray();
         for (JsonObject item : input) inputArray.add(item.deepCopy());
         payload.add("input", inputArray);
@@ -287,6 +294,7 @@ public final class AiAgentService {
             payload.add("input", inputArray);
         }
 
+        AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
         AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
         AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
         AiAgentStatus.set(forceFinal ? "Готовлю финальный ответ" : "Отправляю запрос " + (round + 1));
@@ -368,6 +376,7 @@ public final class AiAgentService {
         AiAgentStatus.set(statusForTool(name));
         AiAgentStatus.set(statusForTool(name));
         AiAgentStatus.set(statusForTool(name));
+        AiAgentStatus.set(statusForTool(name));
         System.out.println("[Minecraft AI Agent] TOOL CALL name=" + name + " args=" + compactJson(arguments, 700));
 
         MinecraftClient client = MinecraftClient.getInstance();
@@ -407,8 +416,55 @@ public final class AiAgentService {
             case "fill_area" -> fillArea(server, args);
             case "break_block" -> breakBlock(server, args);
             case "give_item" -> giveItem(server, args);
+            case "get_inventory" -> getInventory(server, args);
+            case "remember_memory" -> rememberMemory(args);
+            case "forget_memory" -> forgetMemory(args);
             default -> throw new IllegalArgumentException("Unknown tool: " + name);
         };
+    }
+
+    private static JsonObject getInventory(MinecraftServer server, JsonObject args) {
+        ServerPlayerEntity player = getPlayer(server, string(args, "player", ""));
+        JsonArray items = new JsonArray();
+        int nonEmpty = 0;
+
+        for (int slot = 0; slot < player.getInventory().size(); slot++) {
+            ItemStack stack = player.getInventory().getStack(slot);
+            if (stack.isEmpty()) continue;
+            nonEmpty++;
+
+            JsonObject item = new JsonObject();
+            item.addProperty("slot", slot);
+            item.addProperty("item", Registries.ITEM.getId(stack.getItem()).toString());
+            item.addProperty("count", stack.getCount());
+            items.add(item);
+        }
+
+        JsonObject data = new JsonObject();
+        data.addProperty("name", player.getName().getString());
+        data.addProperty("occupied_slots", nonEmpty);
+        data.add("items", items);
+        return data;
+    }
+
+    private static JsonObject rememberMemory(JsonObject args) {
+        String text = string(args, "text", "");
+        boolean added = AiAgentMemory.remember(text);
+        JsonObject data = new JsonObject();
+        data.addProperty("saved", added);
+        data.addProperty("memory_count", AiAgentMemory.count());
+        data.addProperty("text", text);
+        return data;
+    }
+
+    private static JsonObject forgetMemory(JsonObject args) {
+        String text = string(args, "text", "");
+        boolean removed = AiAgentMemory.forget(text);
+        JsonObject data = new JsonObject();
+        data.addProperty("removed", removed);
+        data.addProperty("memory_count", AiAgentMemory.count());
+        data.addProperty("text", text);
+        return data;
     }
 
     private static JsonObject getPlayerState(MinecraftServer server, JsonObject args) {
@@ -627,7 +683,7 @@ public final class AiAgentService {
 
     private static List<JsonObject> buildOpenAiContext(String currentMessage) {
         List<JsonObject> result = new ArrayList<>();
-        result.add(chatMessage("system", INSTRUCTIONS));
+        result.add(chatMessage("system", INSTRUCTIONS + "\n\nPersistent memory:\n" + AiAgentMemory.forPrompt()));
         for (AiChatHistory.Entry entry : AiChatHistory.getRecentForApi(API_HISTORY_MESSAGES, API_HISTORY_CHARS)) {
             result.add(chatMessage(entry.role(), entry.text()));
         }
@@ -819,6 +875,15 @@ public final class AiAgentService {
         )));
         tools.add(function("break_block", "Break one exact block. Use only when the player explicitly asks to remove it.", objectProperties(
                 intProperty("x"), intProperty("y"), intProperty("z")
+        )));
+        tools.add(function("get_inventory", "Inspect the current player's inventory so the agent can see which materials/items are available. This is read-only.", objectProperties(
+                property("player", "string", "Player name. Empty means the first online player.", false)
+        )));
+        tools.add(function("remember_memory", "Save one durable user-requested fact or preference to persistent local memory. Use only when the player explicitly asks to remember it.", objectProperties(
+                property("text", "string", "One concise fact or preference to remember.", true)
+        )));
+        tools.add(function("forget_memory", "Remove one exact stored memory entry. Use only when the player explicitly asks to forget it.", objectProperties(
+                property("text", "string", "The exact stored memory text to remove.", true)
         )));
         tools.add(function("give_item", "Give an item directly to a player. Count is clamped to 1..64.", objectProperties(
                 property("player", "string", "Player name. Empty means the first online player.", false),
