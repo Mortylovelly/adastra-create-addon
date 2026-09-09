@@ -3,6 +3,7 @@ package com.mortylovelly.minecraftai.client;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
 import org.lwjgl.glfw.GLFW;
@@ -15,14 +16,18 @@ public final class MinecraftAiAgentClient implements ClientModInitializer {
         openPanelKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
                 "key.minecraft_ai_agent.open_panel",
                 InputUtil.Type.KEYSYM,
-                GLFW.GLFW_KEY_GRAVE_ACCENT,
+                GLFW.GLFW_KEY_ENTER,
                 "category.minecraft_ai_agent"
         ));
 
-        ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            while (openPanelKey.wasPressed()) {
+        ClientTickEvents.END_CLIENT_TICK.register(MinecraftAiAgentClient::tick);
+    }
+
+    private static void tick(MinecraftClient client) {
+        while (openPanelKey.wasPressed()) {
+            if (client.currentScreen == null && client.player != null) {
                 client.setScreen(new AiChatScreen());
             }
-        });
+        }
     }
 }
