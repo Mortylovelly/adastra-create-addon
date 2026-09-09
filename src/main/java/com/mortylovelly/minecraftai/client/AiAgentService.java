@@ -19,9 +19,8 @@ import java.io.IOException;
 import java.net.ConnectException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.net.Socket;
-import java.net.InetAddress;
 import java.net.ProxySelector;
+import java.net.Socket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -37,15 +36,19 @@ import java.util.concurrent.TimeUnit;
 public final class AiAgentService {
     private static final URI DEEPSEEK_URI = URI.create("https://api.deepseek.com/responses");
     private static final URI GROQ_URI = URI.create("https://api.groq.com/openai/v1/chat/completions");
+    private static final URI OPENROUTER_URI = URI.create("https://openrouter.ai/api/v1/chat/completions");
+
     private static final HttpClient HTTP = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(20))
             .version(HttpClient.Version.HTTP_1_1)
             .proxy(ProxySelector.getDefault())
             .build();
+
     private static final int NETWORK_RETRIES = 2;
 
     private static final String DEEPSEEK_MODEL = "deepseek-v4-flash";
     private static final String GROQ_MODEL = "openai/gpt-oss-20b";
+    private static final String OPENROUTER_MODEL = "openrouter/free";
 
     private static final String INSTRUCTIONS = """
             You are the AI agent inside a Minecraft 1.21.1 world.
@@ -61,7 +64,7 @@ public final class AiAgentService {
 
     private static final List<JsonObject> TOOLS = createTools();
     private static final JsonArray DEEPSEEK_CONVERSATION = new JsonArray();
-    private static final JsonArray GROQ_CONVERSATION = new JsonArray();
+    private static final JsonArray OPENAI_CONVERSATION = new JsonArray();
     private static String historyProvider = "";
 
     private AiAgentService() {}
@@ -74,33 +77,35 @@ public final class AiAgentService {
 
         resetHistoryIfProviderChanged(provider);
 
-        if (provider.equals("groq")) {
-            synchronized (GROQ_CONVERSATION) {
-                GROQ_CONVERSATION.add(chatMessage("user", message));
+        if (isOpenAiCompatibleProvider(provider)) {
+            synchronized (OPENAI_CONVERSATION) {
+                OPENAI_CONVERSATION.add(chatMessage("user", message));
             }
-            return groqRequest(buildGroqPayload()).thenCompose(response -> processGroqResponse(response, 0));
+            return openAiCompatibleRequest(buildOpenAiCompatiblePayload())
+                    .thenCompose(response -> processOpenAiCompatibleResponse(response, 0));
         }
 
         synchronized (DEEPSEEK_CONVERSATION) {
             DEEPSEEK_CONVERSATION.add(deepSeekMessage(message));
         }
-        return deepSeekRequest(buildDeepSeekPayload()).thenCompose(response -> processDeepSeekResponse(response, 0));
+        return deepSeekRequest(buildDeepSeekPayload())
+                .thenCompose(response -> processDeepSeekResponse(response, 0));
     }
 
     public static CompletableFuture<Boolean> testConnection() {
         String provider = AiClientConfig.getProvider();
         if (!AiClientConfig.hasApiKey()) return CompletableFuture.completedFuture(false);
 
-        if (provider.equals("groq")) {
+        if (isOpenAiCompatibleProvider(provider)) {
             JsonObject payload = new JsonObject();
-            payload.addProperty("model", GROQ_MODEL);
+            payload.addProperty("model", modelForProvider(provider));
             JsonArray messages = new JsonArray();
             messages.add(chatMessage("system", "Reply with exactly: OK"));
             messages.add(chatMessage("user", "Connection test"));
             payload.add("messages", messages);
             payload.addProperty("temperature", 0);
 
-            return groqRequest(payload).thenApply(root -> {
+            return openAiCompatibleRequest(payload).thenApply(root -> {
                 JsonObject choice = firstChoice(root);
                 if (choice == null || !choice.has("message")) return false;
                 JsonObject assistant = choice.getAsJsonObject("message");
@@ -117,12 +122,20 @@ public final class AiAgentService {
                 root.has("output_text") && !root.get("output_text").getAsString().isBlank());
     }
 
+    private static boolean isOpenAiCompatibleProvider(String provider) {
+        return provider.equals("groq") || provider.equals("openrouter");
+    }
+
     private static void resetHistoryIfProviderChanged(String provider) {
         synchronized (DEEPSEEK_CONVERSATION) {
-            synchronized (GROQ_CONVERSATION) {
+            synchronized (OPENAI_CONVERSATION) {
                 if (!provider.equals(historyProvider)) {
-                    while (!DEEPSEEK_CONVERSATION.isEmpty()) DEEPSEEK_CONVERSATION.remove(DEEPSEEK_CONVERSATION.size() - 1);
-                    while (!GROQ_CONVERSATION.isEmpty()) GROQ_CONVERSATION.remove(GROQ_CONVERSATION.size() - 1);
+                    while (!DEEPSEEK_CONVERSATION.isEmpty()) {
+                        DEEPSEEK_CONVERSATION.remove(DEEPSEEK_CONVERSATION.size() - 1);
+                    }
+                    while (!OPENAI_CONVERSATION.isEmpty()) {
+                        OPENAI_CONVERSATION.remove(OPENAI_CONVERSATION.size() - 1);
+                    }
                     historyProvider = provider;
                 }
             }
@@ -141,18 +154,20 @@ public final class AiAgentService {
         return payload;
     }
 
-    private static JsonObject buildGroqPayload() {
+    private static JsonObject buildOpenAiCompatiblePayload() {
+        String provider = AiClientConfig.getProvider();
         JsonObject payload = new JsonObject();
-        payload.addProperty("model", GROQ_MODEL);
+        payload.addProperty("model", modelForProvider(provider));
+
         JsonArray messages = new JsonArray();
         messages.add(chatMessage("system", INSTRUCTIONS));
-        synchronized (GROQ_CONVERSATION) {
-            for (JsonElement element : GROQ_CONVERSATION) {
+        synchronized (OPENAI_CONVERSATION) {
+            for (JsonElement element : OPENAI_CONVERSATION) {
                 messages.add(element.deepCopy());
             }
         }
         payload.add("messages", messages);
-        payload.add("tools", groqToolsArray());
+        payload.add("tools", openAiToolsArray());
         payload.addProperty("tool_choice", "auto");
         return payload;
     }
@@ -209,14 +224,17 @@ public final class AiAgentService {
         });
     }
 
-    private static CompletableFuture<String> processGroqResponse(JsonObject response, int depth) {
+    private static CompletableFuture<String> processOpenAiCompatibleResponse(JsonObject response, int depth) {
         if (depth >= 24) {
             return CompletableFuture.completedFuture("ИИ достиг лимита действий для одной задачи.");
         }
 
         JsonObject choice = firstChoice(response);
+        String provider = AiClientConfig.getProvider();
+        String name = providerName(provider);
+
         if (choice == null || !choice.has("message")) {
-            return CompletableFuture.completedFuture("Groq не вернул ожидаемый ответ.");
+            return CompletableFuture.completedFuture(name + " не вернул ожидаемый ответ.");
         }
 
         JsonObject assistant = choice.getAsJsonObject("message");
@@ -224,14 +242,14 @@ public final class AiAgentService {
                 ? assistant.getAsJsonArray("tool_calls")
                 : new JsonArray();
 
-        synchronized (GROQ_CONVERSATION) {
-            GROQ_CONVERSATION.add(assistant.deepCopy());
+        synchronized (OPENAI_CONVERSATION) {
+            OPENAI_CONVERSATION.add(assistant.deepCopy());
         }
 
         if (toolCalls.isEmpty()) {
             String text = assistant.has("content") && !assistant.get("content").isJsonNull()
                     ? assistant.get("content").getAsString()
-                    : "Groq не вернул текстовый ответ.";
+                    : name + " не вернул текстовый ответ.";
             return CompletableFuture.completedFuture(text);
         }
 
@@ -241,30 +259,29 @@ public final class AiAgentService {
             if (!element.isJsonObject()) continue;
             JsonObject call = element.getAsJsonObject();
             validCalls.add(call);
-            futures.add(executeGroqToolAsync(call));
+            futures.add(executeOpenAiToolAsync(call));
         }
 
         return sequence(futures).thenCompose(results -> {
-            synchronized (GROQ_CONVERSATION) {
+            synchronized (OPENAI_CONVERSATION) {
                 for (int i = 0; i < validCalls.size(); i++) {
                     JsonObject call = validCalls.get(i);
                     JsonObject result = new JsonObject();
                     result.addProperty("role", "tool");
                     result.addProperty("tool_call_id", string(call, "id", ""));
                     result.addProperty("content", results.get(i).toString());
-                    GROQ_CONVERSATION.add(result);
+                    OPENAI_CONVERSATION.add(result);
                 }
             }
-            return groqRequest(buildGroqPayload())
-                    .thenCompose(next -> processGroqResponse(next, depth + 1));
+            return openAiCompatibleRequest(buildOpenAiCompatiblePayload())
+                    .thenCompose(next -> processOpenAiCompatibleResponse(next, depth + 1));
         });
     }
 
-    private static CompletableFuture<JsonObject> executeGroqToolAsync(JsonObject call) {
+    private static CompletableFuture<JsonObject> executeOpenAiToolAsync(JsonObject call) {
         JsonObject function = call.has("function") && call.get("function").isJsonObject()
                 ? call.getAsJsonObject("function")
                 : call;
-        String name = string(function, "name", "");
         JsonObject arguments;
         try {
             arguments = JsonParser.parseString(string(function, "arguments", "{}")).getAsJsonObject();
@@ -274,7 +291,7 @@ public final class AiAgentService {
             error.addProperty("error", "Invalid tool arguments: " + exception.getMessage());
             return CompletableFuture.completedFuture(error);
         }
-        return executeToolAsync(name, arguments);
+        return executeToolAsync(string(function, "name", ""), arguments);
     }
 
     private static CompletableFuture<JsonObject> executeToolAsync(JsonObject call) {
@@ -282,8 +299,11 @@ public final class AiAgentService {
         JsonObject arguments;
         try {
             JsonElement raw = call.get("arguments");
-            if (raw != null && raw.isJsonObject()) arguments = raw.getAsJsonObject();
-            else arguments = JsonParser.parseString(string(call, "arguments", "{}")).getAsJsonObject();
+            if (raw != null && raw.isJsonObject()) {
+                arguments = raw.getAsJsonObject();
+            } else {
+                arguments = JsonParser.parseString(string(call, "arguments", "{}")).getAsJsonObject();
+            }
         } catch (RuntimeException exception) {
             JsonObject error = new JsonObject();
             error.addProperty("ok", false);
@@ -382,7 +402,9 @@ public final class AiAgentService {
     private static JsonObject placeBlocks(MinecraftServer server, JsonObject args) {
         ServerWorld world = getWorld(server);
         JsonArray blocks = args.getAsJsonArray("blocks");
-        if (blocks.size() > 512) throw new IllegalArgumentException("place_blocks is limited to 512 blocks per call");
+        if (blocks.size() > 512) {
+            throw new IllegalArgumentException("place_blocks is limited to 512 blocks per call");
+        }
 
         int changed = 0;
         for (JsonElement element : blocks) {
@@ -462,7 +484,7 @@ public final class AiAgentService {
         return array;
     }
 
-    private static JsonArray groqToolsArray() {
+    private static JsonArray openAiToolsArray() {
         JsonArray array = new JsonArray();
         for (JsonObject tool : TOOLS) {
             JsonObject function = tool.deepCopy();
@@ -580,17 +602,27 @@ public final class AiAgentService {
         return request(DEEPSEEK_URI, AiClientConfig.getDeepSeekApiKey(), payload, "DeepSeek");
     }
 
-    private static CompletableFuture<JsonObject> groqRequest(JsonObject payload) {
-        return request(GROQ_URI, AiClientConfig.getGroqApiKey(), payload, "Groq");
+    private static CompletableFuture<JsonObject> openAiCompatibleRequest(JsonObject payload) {
+        String provider = AiClientConfig.getProvider();
+        URI uri = provider.equals("openrouter") ? OPENROUTER_URI : GROQ_URI;
+        String key = provider.equals("openrouter")
+                ? AiClientConfig.getOpenRouterApiKey()
+                : AiClientConfig.getGroqApiKey();
+        return request(uri, key, payload, providerName(provider));
     }
 
-    private static CompletableFuture<JsonObject> request(URI uri, String apiKey, JsonObject payload, String providerName) {
+    private static CompletableFuture<JsonObject> request(
+            URI uri, String apiKey, JsonObject payload, String providerName) {
         HttpRequest request = HttpRequest.newBuilder(uri)
                 .timeout(Duration.ofSeconds(120))
                 .header("Authorization", "Bearer " + apiKey)
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(payload.toString(), StandardCharsets.UTF_8))
                 .build();
+
+        System.out.println("[Minecraft AI Agent][" + providerName + "] HTTP REQUEST url=" + uri
+                + " bodyBytes=" + request.bodyPublisher().map(publisher -> payload.toString().getBytes(StandardCharsets.UTF_8).length).orElse(0));
+        logNetworkDiagnostics(uri, providerName);
 
         return sendWithRetry(request, providerName, 0)
                 .thenCompose(response -> {
@@ -604,21 +636,73 @@ public final class AiAgentService {
                         ));
                     } catch (RuntimeException exception) {
                         return CompletableFuture.failedFuture(new IOException(
-                                "Неверный ответ " + providerName + " API: " + exception.getMessage()
-                        ));
+                                "Неверный ответ " + providerName + " API: " + exception.getMessage(), exception));
                     }
                 });
     }
 
+    private static void logNetworkDiagnostics(URI uri, String providerName) {
+        CompletableFuture.runAsync(() -> {
+            String host = uri.getHost();
+            System.out.println("[Minecraft AI Agent][" + providerName + "] NET START host=" + host + " port=443");
+
+            try {
+                long dnsStart = System.nanoTime();
+                InetAddress[] addresses = InetAddress.getAllByName(host);
+                long dnsMs = Duration.ofNanos(System.nanoTime() - dnsStart).toMillis();
+
+                StringBuilder resolved = new StringBuilder();
+                for (int i = 0; i < addresses.length; i++) {
+                    if (i > 0) resolved.append(", ");
+                    resolved.append(addresses[i].getHostAddress());
+                }
+                System.out.println("[Minecraft AI Agent][" + providerName + "] DNS OK " + dnsMs + " ms -> " + resolved);
+
+                for (InetAddress address : addresses) {
+                    long tcpStart = System.nanoTime();
+                    try (Socket socket = new Socket()) {
+                        socket.connect(new InetSocketAddress(address, 443), 3000);
+                        long tcpMs = Duration.ofNanos(System.nanoTime() - tcpStart).toMillis();
+                        System.out.println("[Minecraft AI Agent][" + providerName + "] TCP OK "
+                                + address.getHostAddress() + " " + tcpMs + " ms");
+                    } catch (Exception exception) {
+                        long tcpMs = Duration.ofNanos(System.nanoTime() - tcpStart).toMillis();
+                        System.err.println("[Minecraft AI Agent][" + providerName + "] TCP FAIL "
+                                + address.getHostAddress() + " " + tcpMs + " ms: "
+                                + exception.getClass().getSimpleName() + " | " + exception.getMessage());
+                    }
+                }
+            } catch (Exception exception) {
+                System.err.println("[Minecraft AI Agent][" + providerName + "] DNS FAIL: "
+                        + exception.getClass().getSimpleName() + " | " + exception.getMessage());
+            }
+
+            System.out.println("[Minecraft AI Agent][" + providerName + "] NET END");
+        });
+    }
+
     private static CompletableFuture<HttpResponse<String>> sendWithRetry(
             HttpRequest request, String providerName, int attempt) {
+        long started = System.nanoTime();
+        System.out.println("[Minecraft AI Agent][" + providerName + "] HTTP START attempt="
+                + (attempt + 1) + "/" + (NETWORK_RETRIES + 1) + " host=" + request.uri().getHost());
+
         return HTTP.sendAsync(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
                 .handle((response, throwable) -> {
+                    long elapsedMs = Duration.ofNanos(System.nanoTime() - started).toMillis();
+
                     if (throwable == null) {
+                        System.out.println("[Minecraft AI Agent][" + providerName + "] HTTP RESPONSE status="
+                                + response.statusCode() + " in=" + elapsedMs + " ms");
                         return CompletableFuture.completedFuture(response);
                     }
 
-                    Throwable cause = throwable.getCause() != null ? throwable.getCause() : throwable;
+                    Throwable cause = rootCause(throwable);
+                    System.err.println("[Minecraft AI Agent][" + providerName + "] HTTP FAIL in="
+                            + elapsedMs + " ms type=" + cause.getClass().getName()
+                            + " message=" + String.valueOf(cause.getMessage()));
+                    logCauseChain(providerName, throwable);
+
                     boolean retryable = cause instanceof ConnectException
                             || cause instanceof HttpTimeoutException;
 
@@ -628,12 +712,33 @@ public final class AiAgentService {
                     }
 
                     long delay = 2L * (attempt + 1);
+                    System.out.println("[Minecraft AI Agent][" + providerName + "] RETRY after "
+                            + delay + " s");
                     return CompletableFuture.supplyAsync(
                             () -> null,
                             CompletableFuture.delayedExecutor(delay, TimeUnit.SECONDS))
                             .thenCompose(ignored -> sendWithRetry(request, providerName, attempt + 1));
                 })
                 .thenCompose(future -> future);
+    }
+
+    private static Throwable rootCause(Throwable throwable) {
+        Throwable current = throwable;
+        while (current.getCause() != null && current.getCause() != current) {
+            current = current.getCause();
+        }
+        return current;
+    }
+
+    private static void logCauseChain(String providerName, Throwable throwable) {
+        int depth = 0;
+        Throwable current = throwable;
+        while (current != null && depth < 8) {
+            System.err.println("[Minecraft AI Agent][" + providerName + "] CAUSE[" + depth + "] "
+                    + current.getClass().getName() + " | " + String.valueOf(current.getMessage()));
+            current = current.getCause();
+            depth++;
+        }
     }
 
     private static JsonObject deepSeekMessage(String content) {
@@ -659,7 +764,18 @@ public final class AiAgentService {
     }
 
     private static String providerName(String provider) {
-        return provider.equals("groq") ? "Groq" : "DeepSeek";
+        return switch (provider) {
+            case "groq" -> "Groq";
+            case "openrouter" -> "OpenRouter";
+            default -> "DeepSeek";
+        };
+    }
+
+    private static String modelForProvider(String provider) {
+        return switch (provider) {
+            case "openrouter" -> OPENROUTER_MODEL;
+            default -> GROQ_MODEL;
+        };
     }
 
     private static String extractError(JsonObject body) {
