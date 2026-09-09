@@ -6,6 +6,8 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.block.Block;
+import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
 import net.minecraft.registry.Registries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -140,6 +142,7 @@ public final class AiBridgeServer {
                     case "place_block" -> placeBlock(server, args);
                     case "break_block" -> breakBlock(server, args);
                     case "move_to" -> moveTo(server, args);
+                    case "give_item" -> giveItem(server, args);
                     case "send_chat" -> sendChat(server, args);
                     default -> throw new IllegalArgumentException("Unknown tool: " + tool);
                 };
@@ -280,6 +283,38 @@ public final class AiBridgeServer {
         data.addProperty("x", x);
         data.addProperty("y", y);
         data.addProperty("z", z);
+        return data;
+    }
+
+    private static JsonObject giveItem(MinecraftServer server, JsonObject args) {
+        String playerName = string(args, "player", "");
+        ServerPlayerEntity player = playerName.isBlank()
+                ? server.getPlayerManager().getPlayerList().stream().findFirst().orElse(null)
+                : server.getPlayerManager().getPlayer(playerName);
+        if (player == null) {
+            throw new IllegalArgumentException("No matching player is online");
+        }
+
+        String itemId = string(args, "item", "");
+        Identifier id = Identifier.tryParse(itemId);
+        if (id == null || !Registries.ITEM.containsId(id)) {
+            throw new IllegalArgumentException("Unknown item: " + itemId);
+        }
+
+        int count = Math.max(1, Math.min(64, optionalInt(args, "count", 1)));
+        Item item = Registries.ITEM.get(id);
+        ItemStack stack = new ItemStack(item, count);
+        boolean inserted = player.getInventory().insertStack(stack);
+        if (!inserted && !stack.isEmpty()) {
+            player.dropItem(stack, false);
+        }
+        player.currentScreenHandler.sendContentUpdates();
+
+        JsonObject data = new JsonObject();
+        data.addProperty("item", itemId);
+        data.addProperty("requested_count", count);
+        data.addProperty("left_over", stack.getCount());
+        data.addProperty("given", count - stack.getCount());
         return data;
     }
 
