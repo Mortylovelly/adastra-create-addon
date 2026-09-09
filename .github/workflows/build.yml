@@ -24,7 +24,7 @@ jobs:
       - name: Grant Gradle permission
         run: chmod +x gradlew
 
-      - name: Fix Gson JsonArray compatibility
+      - name: Fix Java network handling
         shell: bash
         run: |
           python3 - <<'PY'
@@ -33,29 +33,63 @@ jobs:
           path = Path('src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java')
           text = path.read_text(encoding='utf-8')
 
-          replacements = {
-              'DEEPSEEK_CONVERSATION.clear();': 'while (!DEEPSEEK_CONVERSATION.isEmpty()) DEEPSEEK_CONVERSATION.remove(DEEPSEEK_CONVERSATION.size() - 1);',
-              'GROQ_CONVERSATION.clear();': 'while (!GROQ_CONVERSATION.isEmpty()) GROQ_CONVERSATION.remove(GROQ_CONVERSATION.size() - 1);',
-          }
+          text = text.replace(
+              'import java.net.URI;\n',
+              'import java.net.ConnectException;\n'
+              'import java.net.ProxySelector;\n'
+              'import java.net.URI;\n'
+          )
+          text = text.replace(
+              'import java.net.http.HttpResponse;\n',
+              'import java.net.http.HttpResponse;\n'
+              'import java.net.http.HttpTimeoutException;\n'
+          )
+          text = text.replace(
+              'import java.util.concurrent.CompletableFuture;\n',
+              'import java.util.concurrent.CompletableFuture;\n'
+              'import java.util.concurrent.TimeUnit;\n'
+          )
 
-          for old, new in replacements.items():
-              text = text.replace(old, new)
+          old_client = '''private static final HttpClient HTTP = HttpClient.newBuilder()\n            .connectTimeout(Duration.ofSeconds(10))\n            .build();'''
+          new_client = '''private static final HttpClient HTTP = HttpClient.newBuilder()\n            .connectTimeout(Duration.ofSeconds(20))\n            .version(HttpClient.Version.HTTP_1_1)\n            .proxy(ProxySelector.getDefault())\n            .build();\n    private static final int NETWORK_RETRIES = 2;'''
+          text = text.replace(old_client, new_client)
+
+          old_request = '''return HTTP.sendAsync(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))\n                .thenCompose(response -> {'''
+          new_request = '''return sendWithRetry(request, providerName, 0)\n                .thenCompose(response -> {'''
+          text = text.replace(old_request, new_request)
+
+          marker = '''    private static JsonObject deepSeekMessage(String content) {'''
+          helper = '''    private static CompletableFuture<HttpResponse<String>> sendWithRetry(\n            HttpRequest request, String providerName, int attempt) {\n        return HTTP.sendAsync(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))\n                .handle((response, throwable) -> {\n                    if (throwable == null) {\n                        return CompletableFuture.completedFuture(response);\n                    }\n\n                    Throwable cause = throwable.getCause() != null ? throwable.getCause() : throwable;\n                    boolean retryable = cause instanceof ConnectException\n                            || cause instanceof HttpTimeoutException;\n\n                    if (!retryable || attempt >= NETWORK_RETRIES) {\n                        return CompletableFuture.<HttpResponse<String>>failedFuture(\n                                new IOException(providerName + " connection failed: " + cause.getMessage(), cause));\n                    }\n\n                    long delay = 2L * (attempt + 1);\n                    return CompletableFuture.supplyAsync(\n                            () -> null,\n                            CompletableFuture.delayedExecutor(delay, TimeUnit.SECONDS))\n                            .thenCompose(ignored -> sendWithRetry(request, providerName, attempt + 1));\n                })\n                .thenCompose(future -> future);\n    }\n\n'''
+          if marker not in text:
+              raise SystemExit('Could not find insertion marker in AiAgentService.java')
+          if 'sendWithRetry(HttpRequest request, String providerName, int attempt)' not in text:
+              text = text.replace(marker, helper + marker)
+
+          # Keep the earlier Gson source-compatibility fix permanently in source too.
+          text = text.replace(
+              'DEEPSEEK_CONVERSATION.clear();',
+              'while (!DEEPSEEK_CONVERSATION.isEmpty()) DEEPSEEK_CONVERSATION.remove(DEEPSEEK_CONVERSATION.size() - 1);'
+          )
+          text = text.replace(
+              'GROQ_CONVERSATION.clear();',
+              'while (!GROQ_CONVERSATION.isEmpty()) GROQ_CONVERSATION.remove(GROQ_CONVERSATION.size() - 1);'
+          )
 
           path.write_text(text, encoding='utf-8')
           PY
 
-      - name: Commit source compatibility fix
+      - name: Commit source network fix
         shell: bash
         run: |
           if git diff --quiet -- src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java; then
-            echo "No source compatibility changes needed."
+            echo "No source network changes needed."
             exit 0
           fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java
-          git commit -m "Fix JsonArray history clearing"
+          git commit -m "Improve AI API network resilience"
           git push
 
       - name: Build
