@@ -95,7 +95,10 @@ public final class AiAgentService {
             Understand natural Russian and colloquial requests. Never claim an action without a successful tool result.
             Capability questions are answered directly without tools; real requests should be executed.
             Use the smallest suitable tool. Observe only when position/orientation/environment matters; inspect_region is for exact blocks.
-            For houses use build_house; for custom structures use build_blueprint. Avoid plain solid boxes.
+            For every building request (house, bridge, wall, tower, road, gate, platform, custom structure), use build_structure. Do not use build_house or build_blueprint for ordinary construction.
+            build_structure is a procedural builder: design the structure yourself, choose a sensible material palette and create a coherent result from a small number of primitives. Local coordinates are +X right, +Y up and +Z forward from the player. Prefer one build_structure call containing roughly 4-20 meaningful parts rather than many tiny block calls.
+            When the user asks only for a building idea or design, discuss the design without building. When the user explicitly gives a construction request but has not specified materials/style, briefly propose what you will build and what it will be made from; wait for the user's confirmation or "делай по-своему" before constructing. If the user already specified the material/style or has already approved the plan, build immediately.
+            The build_structure result is ground truth. After a successful build call, do not repeat the same construction through individual set_block/fill_area calls.
             Keep destruction inside the requested area. Prefer one high-level action over many tiny calls.
             Independent tool calls may be grouped. Stop after the requested result is confirmed.
             Memory is per chat; store only durable facts such as preferences, locations, coordinates and styles.
@@ -1476,8 +1479,8 @@ public final class AiAgentService {
         String lower = message == null ? "" : message.toLowerCase(Locale.ROOT).replace('ё', 'е');
         Set<String> selected = new java.util.LinkedHashSet<>();
 
-        if (containsAny(lower, "стро", "дом", "башн", "замок", "построй", "постро", "build")) {
-            selected.addAll(Set.of("observe_world", "inspect_region", "build_house", "build_blueprint", "set_block", "fill_area", "get_block", "break_block", "clear_area"));
+        if (containsAny(lower, "стро", "дом", "башн", "замок", "мост", "стен", "дорог", "арка", "ворот", "построй", "постро", "build")) {
+            selected.addAll(Set.of("get_player_state", "observe_world", "build_structure"));
         }
         if (containsAny(lower, "деревн", "шахт", "кораб", "портал", "крепост", "найди", "телепорт")) {
             selected.addAll(Set.of("locate_structure", "observe_world", "teleport_player", "get_player_state"));
@@ -1503,6 +1506,8 @@ public final class AiAgentService {
         if (lower.contains("точк") && containsAny(lower, "возрожд", "респаун", "спавн")) selected.add("set_spawnpoint");
         if (containsAny(lower, "запомн", "помни", "забудь", "памят")) selected.addAll(Set.of("remember_memory", "forget_memory"));
         if (lower.contains("команд") || lower.startsWith("/") || lower.contains("выполни")) selected.add("run_minecraft_command");
+        if (containsAny(lower, "онлайн", "игроки", "кто играет", "кто на сервере", "кто здесь")) selected.add("list_players");
+        if (containsAny(lower, "убей", "убить", "убирай моб", "удали моб", "зомби уб", "скелет уб", "крипер уб")) selected.add("run_minecraft_command");
         if (containsAny(lower, "онлайн", "игроки", "кто играет", "кто на сервере", "кто здесь")) selected.add("list_players");
         if (containsAny(lower, "убей", "убить", "убирай моб", "удали моб", "зомби уб", "скелет уб", "крипер уб")) selected.add("run_minecraft_command");
         if (containsAny(lower, "онлайн", "игроки", "кто играет", "кто на сервере", "кто здесь")) selected.add("list_players");
@@ -1550,6 +1555,7 @@ public final class AiAgentService {
                 property("player", "string", "Player name; empty means current player.", false),
                 intPropertyOptional("radius", "Search radius in chunks, up to 128.")
         )));
+        tools.add(AiBuildTool.toolDefinition());
         tools.add(function("build_house", "Build a real compact house rather than a plain box: foundation, floor, wall openings, windows, entrance porch, stepped gable roof and chimney. Automatically chooses a safe location near and in front of the player.", objectProperties(
                 property("player", "string", "Player name; empty means current player.", false),
                 intPropertyOptional("width", "Odd width 7..15; default 9."), intPropertyOptional("depth", "Odd depth 7..15; default 7."), intPropertyOptional("wall_height", "Wall height 3..6; default 4."),
