@@ -58,15 +58,15 @@ public final class AiAgentService {
             .proxy(ProxySelector.getDefault())
             .build();
 
-    private static final int MAX_TOOL_ROUNDS = 6;
-    private static final int MAX_TOOL_CALLS = 16;
-    private static final int MAX_TOOL_RESULT_CHARS = 7000;
+    private static final int MAX_TOOL_ROUNDS = 4;
+    private static final int MAX_TOOL_CALLS = 8;
+    private static final int MAX_TOOL_RESULT_CHARS = 1800;
     private static final int MAX_PLACE_BLOCKS = 512;
     private static final int MAX_BLUEPRINT_OPS = 96;
     private static final int MAX_BUILD_VOLUME = 20000;
     private static final int MAX_CLEAR_VOLUME = 32768;
     private static final int MAX_OBSERVE_RADIUS = 10;
-    private static final int MAX_ENTITY_RESULTS = 60;
+    private static final int MAX_ENTITY_RESULTS = 20;
 
     private static final String DEEPSEEK_MODEL = "deepseek-v4-flash";
     private static final String GROQ_MODEL = "openai/gpt-oss-20b";
@@ -77,7 +77,7 @@ public final class AiAgentService {
             "give_item", "apply_effect", "set_player_stats", "clear_inventory",
             "teleport_player", "set_gamemode", "set_time", "set_weather",
             "spawn_entity", "clear_area", "break_block", "run_minecraft_command",
-            "send_chat", "remember_memory", "forget_memory"
+            "send_chat", "remember_memory", "forget_memory", "set_block", "fill_area", "give_experience", "set_spawnpoint"
     );
 
     private static final Set<String> ALLOWED_COMMANDS = Set.of(
@@ -90,21 +90,16 @@ public final class AiAgentService {
     );
 
     private static final String INSTRUCTIONS = """
-            You are the Minecraft AI Agent for a Minecraft 1.21.1 singleplayer world.
-            You have direct access to the current world through Minecraft tools. Treat tool results as ground truth.
-            Understand natural Russian language and colloquial requests: "дай спектатора" means spectator mode, "убери блоки вокруг" means clear an area, "выдай меч с остротой" means give an enchanted item.
-            Never claim a world action happened without a successful tool result.
-            For a capability question such as "можешь ли ты построить дом?", answer directly without tools.
-            For a real requested action, act instead of explaining how the player could do it manually.
-            Before spatially sensitive work, observe the world. Use observe_world for position, orientation, nearby blocks and entities; inspect_region for exact local block layout; locate_structure for villages and other structures.
-            Reason in Minecraft coordinates carefully. Do not invent locations, blocks, mobs or structures.
-            For building, do not make a plain solid box. Prefer build_house for house requests and build_blueprint for custom structures. A good house should have a foundation/floor, walls with openings, windows, an entrance, a roof with shape, and a few details. Keep it compact unless the user asks for a large build.
-            For destruction, affect only the requested area and verify the result. Do not destroy unrelated terrain unless explicitly requested.
-            Prefer one high-level world tool over dozens of tiny calls. You can call multiple independent tools in parallel when appropriate.
-            Remember useful durable facts yourself: player preferences, named locations, important coordinates, preferred building materials or styles and other information likely to help later. Use remember_memory when such a durable fact is learned; do not save trivial one-off chatter.
-            Each chat has its own persistent memory. Do not assume memories from another chat.
-            If a tool fails, explain the failure instead of pretending it succeeded.
-            Keep the number of model rounds small and finish after the requested world action is confirmed.
+            You are Minecraft AI Agent for Minecraft 1.21.1.
+            Control the current singleplayer world through tools; tool results are ground truth.
+            Understand natural Russian and colloquial requests. Never claim an action without a successful tool result.
+            Capability questions are answered directly without tools; real requests should be executed.
+            Use the smallest suitable tool. Observe only when position/orientation/environment matters; inspect_region is for exact blocks.
+            For houses use build_house; for custom structures use build_blueprint. Avoid plain solid boxes.
+            Keep destruction inside the requested area. Prefer one high-level action over many tiny calls.
+            Independent tool calls may be grouped. Stop after the requested result is confirmed.
+            Memory is per chat; store only durable facts such as preferences, locations, coordinates and styles.
+            If a tool fails, report the failure.
             """.strip();
 
     private static final AtomicReference<ActiveTask> ACTIVE = new AtomicReference<>();
@@ -140,8 +135,9 @@ public final class AiAgentService {
         System.out.println("[Minecraft AI Agent][" + providerName(AiClientConfig.getProvider()) + "] TASK START chars=" + message.length() + " chat=" + chatId);
 
         CompletableFuture<String> work;
+        CompletableFuture<String> fastAction = tryFastAction(task, message);
         try {
-            work = switch (AiClientConfig.getProvider()) {
+            work = fastAction != null ? fastAction : switch (AiClientConfig.getProvider()) {
                 case "gemini" -> chatGemini(task, message);
                 case "deepseek" -> chatOpenAiCompatible(task, message, "deepseek");
                 default -> chatOpenAiCompatible(task, message, AiClientConfig.getProvider());
@@ -231,7 +227,7 @@ public final class AiAgentService {
     private static CompletableFuture<String> chatGemini(ActiveTask task, String message) {
         boolean capability = isCapabilityQuestion(message);
         String previous = AiChatHistory.getGeminiInteractionId(task.chatId);
-        return geminiLoop(task, message, previous, 0, 0, capability, false);
+        return geminiLoop(task, message, previous, 0, 0, capability, false, selectToolNames(message));
     }
 
     private static CompletableFuture<String> geminiLoop(
@@ -241,7 +237,8 @@ public final class AiAgentService {
             int round,
             int totalCalls,
             boolean capability,
-            boolean recovery) {
+            boolean recovery,
+            Set<String> selectedTools) {
         if (task.cancelled) return CompletableFuture.completedFuture("Запрос остановлен пользователем.");
         AiAgentStatus.set(capability ? "Готовлю ответ" : round == 0 ? "Отправляю запрос Gemini" : "Продолжаю выполнение");
 
@@ -254,7 +251,7 @@ public final class AiAgentService {
         payload.addProperty("system_instruction", INSTRUCTIONS + "\n\nPersistent memory for this chat:\n" + AiAgentMemory.forPrompt(task.chatId));
         payload.add("input", inputElement);
         if (!capability) {
-            payload.add("tools", geminiToolsArray());
+            payload.add("tools", geminiToolsArray(selectedTools));
             JsonObject generation = new JsonObject();
             generation.addProperty("thinking_level", "low");
             generation.addProperty("temperature", 0.15);
@@ -275,7 +272,7 @@ public final class AiAgentService {
                     if (result.error != null) {
                         Throwable cause = rootCause(result.error);
                         if (!previousInteractionId.isBlank() && !recovery && isBadGeminiInteraction(cause)) {
-                            return geminiLoop(task, message, "", round, totalCalls, capability, true);
+                            return geminiLoop(task, message, "", round, totalCalls, capability, true, selectedTools);
                         }
                         return CompletableFuture.failedFuture(cause);
                     }
@@ -327,12 +324,12 @@ public final class AiAgentService {
                         if (allFastCalls(calls) && results.stream().allMatch(AiAgentService::toolResultOk)) {
                             return CompletableFuture.completedFuture(localActionSummary(calls));
                         }
-                        return geminiFollowUp(task, interactionId, inputResults, round + 1, totalCalls + calls.size());
+                        return geminiFollowUp(task, interactionId, inputResults, round + 1, totalCalls + calls.size(), selectedTools);
                     });
                 });
     }
 
-    private static CompletableFuture<String> geminiFollowUp(ActiveTask task, String interactionId, JsonArray results, int round, int totalCalls) {
+    private static CompletableFuture<String> geminiFollowUp(ActiveTask task, String interactionId, JsonArray results, int round, int totalCalls, Set<String> selectedTools) {
         if (task.cancelled) return CompletableFuture.completedFuture("Запрос остановлен пользователем.");
         JsonObject payload = new JsonObject();
         payload.addProperty("model", GEMINI_MODEL);
@@ -340,7 +337,7 @@ public final class AiAgentService {
         payload.addProperty("previous_interaction_id", interactionId);
         payload.add("input", results);
         payload.addProperty("system_instruction", INSTRUCTIONS + "\n\nPersistent memory for this chat:\n" + AiAgentMemory.forPrompt(task.chatId));
-        payload.add("tools", geminiToolsArray());
+        payload.add("tools", geminiToolsArray(selectedTools));
         JsonObject generation = new JsonObject();
         generation.addProperty("thinking_level", "low");
         generation.addProperty("temperature", 0.15);
@@ -388,14 +385,65 @@ public final class AiAgentService {
                             resultObject.add("result", resultText);
                             nextResults.add(resultObject);
                         }
-                        return geminiFollowUp(task, newId, nextResults, round + 1, totalCalls + calls.size());
+                        return geminiFollowUp(task, newId, nextResults, round + 1, totalCalls + calls.size(), selectedTools);
                     });
                 });
     }
 
+
+    private static CompletableFuture<String> tryFastAction(ActiveTask task, String message) {
+        if (message == null) return null;
+        String lower = message.toLowerCase(Locale.ROOT).replace('ё', 'е').trim();
+        if (lower.length() > 90) return null;
+        JsonObject args = new JsonObject();
+        String name = null;
+        if (!lower.contains("можешь") && !lower.contains("умеешь") && !lower.contains("сможешь")) {
+            if (lower.matches(".*\\b(спектатор|spectator)\\b.*")) {
+                args.addProperty("mode", "spectator");
+                name = "set_gamemode";
+            } else if (lower.matches("^(включи|поставь|сделай|установи)?\\s*(креатив|creative)$")) {
+                args.addProperty("mode", "creative");
+                name = "set_gamemode";
+            } else if (lower.matches("^(включи|поставь|сделай|установи)?\\s*(выживание|survival)$")) {
+                args.addProperty("mode", "survival");
+                name = "set_gamemode";
+            } else if (lower.matches("^(сделай|поставь|включи)?\\s*(день|day)$")) {
+                args.addProperty("time", "day");
+                name = "set_time";
+            } else if (lower.matches("^(сделай|поставь|включи)?\\s*(ночь|night)$")) {
+                args.addProperty("time", "night");
+                name = "set_time";
+            } else if (lower.matches("^(включи|поставь)?\\s*(дождь|rain)$")) {
+                args.addProperty("weather", "rain");
+                name = "set_weather";
+            } else if (lower.matches("^(включи|поставь)?\\s*(гроза|thunder)$")) {
+                args.addProperty("weather", "thunder");
+                name = "set_weather";
+            } else if (lower.equals("ясно") || lower.equals("clear") || lower.matches("^(убери|выключи|останови|сделай)\\s*(дождь|грозу|погоду|солнечно|ясно)$")) {
+                args.addProperty("weather", "clear");
+                name = "set_weather";
+            } else if (lower.matches("^(очисти|очистить|удали|стереть)\\s+(весь\\s+)?инвентар(ь|я)$")) {
+                name = "clear_inventory";
+            }
+        }
+        if (name == null) return null;
+        final String actionName = name;
+        return runOnServer(task, actionName, args).thenApply(result -> {
+            if (!toolResultOk(result)) return "Не удалось выполнить действие: " + string(result, "error", "неизвестная ошибка");
+            return localActionSummary(List.of(toolCallForSummary(actionName)));
+        });
+    }
+
+    private static JsonObject toolCallForSummary(String name) {
+        JsonObject call = new JsonObject();
+        call.addProperty("name", name);
+        return call;
+    }
+
     private static CompletableFuture<String> chatOpenAiCompatible(ActiveTask task, String message, String provider) {
         List<JsonObject> messages = buildOpenAiContext(task.chatId, message, provider);
-        return openAiLoop(task, messages, provider, new HashMap<>(), 0, 0, false, isCapabilityQuestion(message));
+        Set<String> selectedTools = selectToolNames(message);
+        return openAiLoop(task, messages, provider, new HashMap<>(), 0, 0, false, isCapabilityQuestion(message), selectedTools);
     }
 
     private static CompletableFuture<String> openAiLoop(
@@ -406,7 +454,8 @@ public final class AiAgentService {
             int round,
             int totalCalls,
             boolean ignored,
-            boolean capability) {
+            boolean capability,
+            Set<String> selectedTools) {
         if (task.cancelled) return CompletableFuture.completedFuture("Запрос остановлен пользователем.");
         JsonObject payload = new JsonObject();
         payload.addProperty("model", modelForProvider(provider));
@@ -414,7 +463,7 @@ public final class AiAgentService {
         for (JsonObject message : messages) array.add(message.deepCopy());
         payload.add("messages", array);
         if (!capability) {
-            payload.add("tools", openAiToolsArray());
+            payload.add("tools", openAiToolsArray(selectedTools));
             payload.addProperty("tool_choice", "auto");
         } else {
             payload.addProperty("tool_choice", "none");
@@ -461,7 +510,7 @@ public final class AiAgentService {
                             AiAgentStatus.clear();
                             return CompletableFuture.completedFuture(localActionSummary(validCalls));
                         }
-                        return openAiLoop(task, messages, provider, cache, round + 1, totalCalls + validCalls.size(), false, false);
+                        return openAiLoop(task, messages, provider, cache, round + 1, totalCalls + validCalls.size(), false, false, selectedTools);
                     });
                 });
     }
@@ -526,13 +575,22 @@ public final class AiAgentService {
             case "forget_memory" -> forgetMemory(args);
             case "run_minecraft_command" -> runMinecraftCommand(server, args);
             case "send_chat" -> sendChat(server, args);
+            case "get_player_state" -> getPlayerState(server, args);
+            case "get_block" -> getBlock(server, args);
+            case "set_block" -> setBlock(server, args);
+            case "fill_area" -> fillArea(server, args, task);
+            case "find_entities" -> findEntities(server, args);
+            case "give_experience" -> giveExperience(server, args);
+            case "set_spawnpoint" -> setSpawnpoint(server, args);
             default -> errorResult("Неизвестный инструмент: " + name);
         };
     }
 
     private static JsonObject observeWorld(MinecraftServer server, JsonObject args, ActiveTask task) {
         ServerPlayerEntity player = getPlayer(server, string(args, "player", ""));
-        int radius = Math.min(MAX_OBSERVE_RADIUS, Math.max(2, optionalInt(args, "radius", 8)));
+        int radius = Math.min(MAX_OBSERVE_RADIUS, Math.max(2, optionalInt(args, "radius", 6)));
+        String detail = string(args, "detail", "minimal").toLowerCase(Locale.ROOT);
+        boolean fullDetail = detail.equals("full");
         ServerWorld world = player.getServerWorld();
         int px = player.getBlockPos().getX();
         int py = player.getBlockPos().getY();
@@ -549,7 +607,7 @@ public final class AiAgentService {
         List<Entity> nearby = world.getOtherEntities(player,
                 new Box(px - radius, py - radius, pz - radius, px + radius + 1, py + radius + 1, pz + radius + 1),
                 entity -> true);
-        nearby.stream().sorted(Comparator.comparingDouble(entity -> entity.squaredDistanceTo(player))).limit(MAX_ENTITY_RESULTS).forEach(entity -> {
+        nearby.stream().sorted(Comparator.comparingDouble(entity -> entity.squaredDistanceTo(player))).limit(fullDetail ? MAX_ENTITY_RESULTS : Math.min(8, MAX_ENTITY_RESULTS)).forEach(entity -> {
             JsonObject e = new JsonObject();
             e.addProperty("type", Registries.ENTITY_TYPE.getId(entity.getType()).toString());
             e.addProperty("name", entity.getName().getString());
@@ -565,49 +623,51 @@ public final class AiAgentService {
         });
         data.add("nearby_entities", entities);
 
-        JsonArray surface = new JsonArray();
-        int bottom = Math.max(world.getBottomY(), py - 32);
-        int top = Math.min(world.getTopY() - 1, py + 16);
-        for (int dx = -radius; dx <= radius; dx++) {
-            if (task.cancelled) return errorResult("Запрос отменён.");
-            for (int dz = -radius; dz <= radius; dz++) {
-                int x = px + dx;
-                int z = pz + dz;
-                for (int y = top; y >= bottom; y--) {
-                    BlockPos pos = new BlockPos(x, y, z);
-                    var state = world.getBlockState(pos);
-                    if (!state.isAir() && state.isSolidBlock(world, pos)) {
-                        JsonObject cell = new JsonObject();
-                        cell.addProperty("dx", dx);
-                        cell.addProperty("dz", dz);
-                        cell.addProperty("y", y);
-                        cell.addProperty("block", Registries.BLOCK.getId(state.getBlock()).toString());
-                        surface.add(cell);
-                        break;
+        if (fullDetail) {
+            JsonArray surface = new JsonArray();
+            int bottom = Math.max(world.getBottomY(), py - 32);
+            int top = Math.min(world.getTopY() - 1, py + 16);
+            for (int dx = -radius; dx <= radius; dx++) {
+                if (task.cancelled) return errorResult("Запрос отменён.");
+                for (int dz = -radius; dz <= radius; dz++) {
+                    int x = px + dx;
+                    int z = pz + dz;
+                    for (int y = top; y >= bottom; y--) {
+                        BlockPos pos = new BlockPos(x, y, z);
+                        var state = world.getBlockState(pos);
+                        if (!state.isAir() && state.isSolidBlock(world, pos)) {
+                            JsonObject cell = new JsonObject();
+                            cell.addProperty("dx", dx);
+                            cell.addProperty("dz", dz);
+                            cell.addProperty("y", y);
+                            cell.addProperty("block", Registries.BLOCK.getId(state.getBlock()).toString());
+                            surface.add(cell);
+                            break;
+                        }
                     }
                 }
             }
-        }
-        data.add("surface", surface);
+            data.add("surface", surface);
 
-        JsonArray nearbyBlocks = new JsonArray();
-        int localRadius = Math.min(3, radius);
-        for (int dx = -localRadius; dx <= localRadius; dx++) {
-            for (int dy = -2; dy <= 3; dy++) {
-                for (int dz = -localRadius; dz <= localRadius; dz++) {
-                    BlockPos pos = new BlockPos(px + dx, py + dy, pz + dz);
-                    var state = world.getBlockState(pos);
-                    if (state.isAir()) continue;
-                    JsonObject block = new JsonObject();
-                    block.addProperty("dx", dx);
-                    block.addProperty("dy", dy);
-                    block.addProperty("dz", dz);
-                    block.addProperty("block", Registries.BLOCK.getId(state.getBlock()).toString());
-                    nearbyBlocks.add(block);
+            JsonArray nearbyBlocks = new JsonArray();
+            int localRadius = Math.min(3, radius);
+            for (int dx = -localRadius; dx <= localRadius; dx++) {
+                for (int dy = -2; dy <= 3; dy++) {
+                    for (int dz = -localRadius; dz <= localRadius; dz++) {
+                        BlockPos pos = new BlockPos(px + dx, py + dy, pz + dz);
+                        var state = world.getBlockState(pos);
+                        if (state.isAir()) continue;
+                        JsonObject block = new JsonObject();
+                        block.addProperty("dx", dx);
+                        block.addProperty("dy", dy);
+                        block.addProperty("dz", dz);
+                        block.addProperty("block", Registries.BLOCK.getId(state.getBlock()).toString());
+                        nearbyBlocks.add(block);
+                    }
                 }
             }
+            data.add("nearby_blocks", nearbyBlocks);
         }
-        data.add("nearby_blocks", nearbyBlocks);
         return okResult(data);
     }
 
@@ -617,8 +677,8 @@ public final class AiAgentService {
         int cx = args.has("x") ? args.get("x").getAsInt() : player.getBlockPos().getX();
         int cy = args.has("y") ? args.get("y").getAsInt() : player.getBlockPos().getY();
         int cz = args.has("z") ? args.get("z").getAsInt() : player.getBlockPos().getZ();
-        int rx = Math.min(6, Math.max(1, optionalInt(args, "radius", 4)));
-        int ry = Math.min(5, Math.max(1, optionalInt(args, "vertical", 3)));
+        int rx = Math.min(5, Math.max(1, optionalInt(args, "radius", 3)));
+        int ry = Math.min(4, Math.max(1, optionalInt(args, "vertical", 2)));
         JsonArray blocks = new JsonArray();
         int total = 0;
         for (int x = cx - rx; x <= cx + rx; x++) {
@@ -628,7 +688,7 @@ public final class AiAgentService {
                     var state = world.getBlockState(new BlockPos(x, y, z));
                     if (state.isAir()) continue;
                     total++;
-                    if (blocks.size() >= 900) continue;
+                    if (blocks.size() >= 320) continue;
                     JsonObject block = new JsonObject();
                     block.addProperty("x", x);
                     block.addProperty("y", y);
@@ -905,6 +965,106 @@ public final class AiAgentService {
         return okResult(data);
     }
 
+    // AI_ECONOMY_TOOLS_V4
+    private static JsonObject getPlayerState(MinecraftServer server, JsonObject args) {
+        return okResult(playerState(getPlayer(server, string(args, "player", ""))));
+    }
+
+    private static JsonObject getBlock(MinecraftServer server, JsonObject args) {
+        ServerPlayerEntity player = getPlayer(server, string(args, "player", ""));
+        ServerWorld world = player.getServerWorld();
+        BlockPos pos = new BlockPos(requiredInt(args, "x"), requiredInt(args, "y"), requiredInt(args, "z"));
+        var state = world.getBlockState(pos);
+        JsonObject data = new JsonObject();
+        data.addProperty("x", pos.getX());
+        data.addProperty("y", pos.getY());
+        data.addProperty("z", pos.getZ());
+        data.addProperty("block", Registries.BLOCK.getId(state.getBlock()).toString());
+        data.addProperty("air", state.isAir());
+        return okResult(data);
+    }
+
+    private static JsonObject setBlock(MinecraftServer server, JsonObject args) {
+        ServerPlayerEntity player = getPlayer(server, string(args, "player", ""));
+        ServerWorld world = player.getServerWorld();
+        Block block = blockFromId(string(args, "block", ""));
+        BlockPos pos = new BlockPos(requiredInt(args, "x"), requiredInt(args, "y"), requiredInt(args, "z"));
+        String previous = Registries.BLOCK.getId(world.getBlockState(pos).getBlock()).toString();
+        boolean changed = world.setBlockState(pos, block.getDefaultState());
+        JsonObject data = new JsonObject();
+        data.addProperty("changed", changed);
+        data.addProperty("previous_block", previous);
+        data.addProperty("block", Registries.BLOCK.getId(block).toString());
+        data.addProperty("x", pos.getX());
+        data.addProperty("y", pos.getY());
+        data.addProperty("z", pos.getZ());
+        return okResult(data);
+    }
+
+    private static JsonObject fillArea(MinecraftServer server, JsonObject args, ActiveTask task) {
+        ServerPlayerEntity player = getPlayer(server, string(args, "player", ""));
+        ServerWorld world = player.getServerWorld();
+        int x1 = requiredInt(args, "x1"), y1 = requiredInt(args, "y1"), z1 = requiredInt(args, "z1");
+        int x2 = requiredInt(args, "x2"), y2 = requiredInt(args, "y2"), z2 = requiredInt(args, "z2");
+        long requested = volume(x1, y1, z1, x2, y2, z2);
+        if (requested > MAX_BUILD_VOLUME) return errorResult("Область слишком большая.");
+        String mode = string(args, "mode", "fill").toLowerCase(Locale.ROOT);
+        if (!mode.equals("fill") && !mode.equals("hollow") && !mode.equals("clear")) return errorResult("Неизвестный режим: " + mode);
+        Block block = mode.equals("clear") ? net.minecraft.block.Blocks.AIR : blockFromId(string(args, "block", ""));
+        int changed = applyCuboid(world, x1, y1, z1, x2, y2, z2, block, mode, task);
+        if (changed < 0) return errorResult("Запрос отменён.");
+        JsonObject data = new JsonObject();
+        data.addProperty("changed_blocks", changed);
+        data.addProperty("requested_blocks", requested);
+        data.addProperty("mode", mode);
+        return okResult(data);
+    }
+
+    private static JsonObject findEntities(MinecraftServer server, JsonObject args) {
+        ServerPlayerEntity player = getPlayer(server, string(args, "player", ""));
+        ServerWorld world = player.getServerWorld();
+        int radius = Math.min(32, Math.max(1, optionalInt(args, "radius", 12)));
+        int limit = Math.min(30, Math.max(1, optionalInt(args, "limit", 10)));
+        String wanted = string(args, "type", "").trim().toLowerCase(Locale.ROOT);
+        Box box = new Box(player.getBlockPos()).expand(radius);
+        List<Entity> entities = world.getOtherEntities(player, box, entity -> {
+            if (wanted.isBlank()) return true;
+            return Registries.ENTITY_TYPE.getId(entity.getType()).toString().equals(wanted)
+                    || entity.getType().getTranslationKey().toLowerCase(Locale.ROOT).contains(wanted);
+        });
+        JsonArray result = new JsonArray();
+        entities.stream().sorted(Comparator.comparingDouble(entity -> entity.squaredDistanceTo(player))).limit(limit).forEach(entity -> {
+            JsonObject item = new JsonObject();
+            item.addProperty("type", Registries.ENTITY_TYPE.getId(entity.getType()).toString());
+            item.addProperty("name", entity.getName().getString());
+            item.addProperty("x", round(entity.getX()));
+            item.addProperty("y", round(entity.getY()));
+            item.addProperty("z", round(entity.getZ()));
+            item.addProperty("distance", round(Math.sqrt(entity.squaredDistanceTo(player))));
+            result.add(item);
+        });
+        JsonObject data = new JsonObject();
+        data.add("entities", result);
+        data.addProperty("count", result.size());
+        return okResult(data);
+    }
+
+    private static JsonObject giveExperience(MinecraftServer server, JsonObject args) {
+        ServerPlayerEntity player = getPlayer(server, string(args, "player", ""));
+        int amount = Math.min(1000000, Math.max(1, requiredInt(args, "amount")));
+        String unit = string(args, "unit", "levels").toLowerCase(Locale.ROOT);
+        if (!unit.equals("levels") && !unit.equals("points")) return errorResult("unit должен быть levels или points.");
+        return runCommand(server, "experience add " + player.getName().getString() + " " + amount + " " + unit);
+    }
+
+    private static JsonObject setSpawnpoint(MinecraftServer server, JsonObject args) {
+        ServerPlayerEntity player = getPlayer(server, string(args, "player", ""));
+        int x = args.has("x") ? args.get("x").getAsInt() : player.getBlockPos().getX();
+        int y = args.has("y") ? args.get("y").getAsInt() : player.getBlockPos().getY();
+        int z = args.has("z") ? args.get("z").getAsInt() : player.getBlockPos().getZ();
+        return runCommand(server, "spawnpoint " + player.getName().getString() + " " + x + " " + y + " " + z);
+    }
+
     private static JsonObject breakBlock(MinecraftServer server, JsonObject args) {
         ServerWorld world = getPlayer(server, string(args, "player", "")).getServerWorld();
         BlockPos pos = new BlockPos(requiredInt(args, "x"), requiredInt(args, "y"), requiredInt(args, "z"));
@@ -1041,7 +1201,20 @@ public final class AiAgentService {
         int x = args.has("x") ? args.get("x").getAsInt() : player.getBlockPos().getX();
         int y = args.has("y") ? args.get("y").getAsInt() : player.getBlockPos().getY();
         int z = args.has("z") ? args.get("z").getAsInt() : player.getBlockPos().getZ();
-        return runCommand(server, "summon " + entity + " " + x + " " + y + " " + z);
+        int count = Math.min(16, Math.max(1, optionalInt(args, "count", 1)));
+        int spawned = 0;
+        for (int i = 0; i < count; i++) {
+            JsonObject result = runCommand(server, "summon " + entity + " " + x + " " + y + " " + z);
+            if (!toolResultOk(result)) return result;
+            spawned++;
+        }
+        JsonObject data = new JsonObject();
+        data.addProperty("spawned", spawned);
+        data.addProperty("entity", entity);
+        data.addProperty("x", x);
+        data.addProperty("y", y);
+        data.addProperty("z", z);
+        return okResult(data);
     }
 
     private static JsonObject getInventory(MinecraftServer server, JsonObject args) {
@@ -1243,6 +1416,10 @@ public final class AiAgentService {
                 case "clear_area" -> "Готово — область очищена.";
                 case "set_player_stats" -> "Готово — характеристики игрока изменены.";
                 case "spawn_entity" -> "Готово — существо создано.";
+                case "set_block" -> "Готово — блок установлен.";
+                case "fill_area" -> "Готово — область изменена.";
+                case "give_experience" -> "Готово — опыт выдан.";
+                case "set_spawnpoint" -> "Готово — точка возрождения установлена.";
                 default -> "Готово.";
             };
         }
@@ -1271,15 +1448,20 @@ public final class AiAgentService {
         return string(function, "name", "unknown");
     }
 
-    private static JsonArray geminiToolsArray() {
+    private static JsonArray geminiToolsArray() { return geminiToolsArray(new java.util.HashSet<>(TOOLS.stream().map(t -> string(t, "name", "")).toList())); }
+
+    private static JsonArray geminiToolsArray(Set<String> selectedTools) {
         JsonArray array = new JsonArray();
-        for (JsonObject tool : TOOLS) array.add(tool.deepCopy());
+        for (JsonObject tool : TOOLS) if (selectedTools.contains(string(tool, "name", ""))) array.add(tool.deepCopy());
         return array;
     }
 
-    private static JsonArray openAiToolsArray() {
+    private static JsonArray openAiToolsArray() { return openAiToolsArray(new java.util.HashSet<>(TOOLS.stream().map(t -> string(t, "name", "")).toList())); }
+
+    private static JsonArray openAiToolsArray(Set<String> selectedTools) {
         JsonArray array = new JsonArray();
         for (JsonObject tool : TOOLS) {
+            if (!selectedTools.contains(string(tool, "name", ""))) continue;
             JsonObject wrapper = new JsonObject();
             wrapper.addProperty("type", "function");
             JsonObject function = tool.deepCopy();
@@ -1289,14 +1471,69 @@ public final class AiAgentService {
         }
         return array;
     }
+        return array;
+    }
+
+
+    private static Set<String> selectToolNames(String message) {
+        String lower = message == null ? "" : message.toLowerCase(Locale.ROOT).replace('ё', 'е');
+        Set<String> selected = new java.util.LinkedHashSet<>();
+
+        if (containsAny(lower, "стро", "дом", "башн", "замок", "построй", "постро", "build")) {
+            selected.addAll(Set.of("observe_world", "inspect_region", "build_house", "build_blueprint", "set_block", "fill_area", "get_block", "break_block", "clear_area"));
+        }
+        if (containsAny(lower, "деревн", "шахт", "кораб", "портал", "крепост", "найди", "телепорт")) {
+            selected.addAll(Set.of("locate_structure", "observe_world", "teleport_player", "get_player_state"));
+        }
+        if (containsAny(lower, "дай", "выдай", "предмет", "меч", "кирк", "брон", "лук", "инвентар")) {
+            selected.addAll(Set.of("give_item", "get_inventory", "clear_inventory", "get_player_state"));
+        }
+        if (containsAny(lower, "эффект", "зель", "скорост", "сил", "реген", "здоров", "голод", "сердц")) {
+            selected.addAll(Set.of("apply_effect", "set_player_stats", "get_player_state"));
+        }
+        if (containsAny(lower, "спектатор", "креатив", "выжива", "приключ", "режим")) {
+            selected.addAll(Set.of("set_gamemode", "get_player_state"));
+        }
+        if (containsAny(lower, "день", "ноч", "полдн", "полноч", "врем")) selected.add("set_time");
+        if (containsAny(lower, "дожд", "гроз", "погода", "солнеч", "ясн")) selected.add("set_weather");
+        if (containsAny(lower, "зомби", "скелет", "крипер", "моб", "существ", "призв", "спавн")) {
+            selected.addAll(Set.of("spawn_entity", "find_entities", "observe_world"));
+        }
+        if (containsAny(lower, "блок", "куб", "заполн", "слома", "разруш", "очист", "удали")) {
+            selected.addAll(Set.of("get_block", "set_block", "fill_area", "break_block", "clear_area", "inspect_region"));
+        }
+        if (containsAny(lower, "xp", "опыт") || (lower.contains("уров") && lower.contains("выдай"))) selected.add("give_experience");
+        if (lower.contains("точк") && containsAny(lower, "возрожд", "респаун", "спавн")) selected.add("set_spawnpoint");
+        if (containsAny(lower, "запомн", "помни", "забудь", "памят")) selected.addAll(Set.of("remember_memory", "forget_memory"));
+        if (lower.contains("команд") || lower.startsWith("/") || lower.contains("выполни")) selected.add("run_minecraft_command");
+        if (containsAny(lower, "напиши в чат", "сообщен", "скажи всем")) selected.add("send_chat");
+
+        if (selected.isEmpty()) {
+            selected.addAll(Set.of("get_player_state", "observe_world", "run_minecraft_command", "give_item", "teleport_player", "set_gamemode", "set_time", "set_weather"));
+        }
+        return selected;
+    }
+
+    private static boolean containsAny(String text, String... parts) {
+        for (String part : parts) if (text.contains(part)) return true;
+        return false;
+    }
 
     private static final List<JsonObject> TOOLS = createTools();
 
     private static List<JsonObject> createTools() {
         List<JsonObject> tools = new ArrayList<>();
+        tools.add(function("get_player_state", "Read compact player position, health, food, mode and dimension.", objectProperties(property("player", "string", "Player name.", false))));
+        tools.add(function("get_block", "Read one exact block ID at coordinates.", objectProperties(property("player", "string", "Player name.", false), intProperty("x"), intProperty("y"), intProperty("z"))));
+        tools.add(function("set_block", "Set one exact block at coordinates.", objectProperties(property("player", "string", "Player name.", false), intProperty("x"), intProperty("y"), intProperty("z"), property("block", "string", "Block ID.", true))));
+        tools.add(function("fill_area", "Fill, hollow or clear one cuboid up to the safe build cap.", objectProperties(property("player", "string", "Player name.", false), intProperty("x1"), intProperty("y1"), intProperty("z1"), intProperty("x2"), intProperty("y2"), intProperty("z2"), enumProperty("mode", new String[]{"fill","hollow","clear"}, "Operation mode.", true), property("block", "string", "Block ID; omitted for clear.", false))));
+        tools.add(function("find_entities", "Find nearby entities with compact positions.", objectProperties(property("player", "string", "Player name.", false), property("type", "string", "Optional entity ID filter.", false), intPropertyOptional("radius", "Search radius up to 32."), intPropertyOptional("limit", "Result limit up to 30."))));
+        tools.add(function("give_experience", "Give experience levels or points.", objectProperties(property("player", "string", "Player name.", false), intProperty("amount"), enumProperty("unit", new String[]{"levels","points"}, "Experience unit.", true))));
+        tools.add(function("set_spawnpoint", "Set the player's respawn point; omitted coordinates use the current position.", objectProperties(property("player", "string", "Player name.", false), intPropertyOptional("x", "Spawn X."), intPropertyOptional("y", "Spawn Y."), intPropertyOptional("z", "Spawn Z."))));
         tools.add(function("observe_world", "Observe the current player, exact position/rotation, time/weather, nearby blocks, surface heightmap and nearby entities/mobs. Use before spatial work.", objectProperties(
                 property("player", "string", "Player name; empty means current player.", false),
-                intPropertyOptional("radius", "Horizontal observation radius, 2..10.")
+                intPropertyOptional("radius", "Horizontal radius 2..10."),
+                enumProperty("detail", new String[]{"minimal","full"}, "Use full only for terrain/block layout.", false)
         )));
         tools.add(function("inspect_region", "Inspect exact non-air blocks in a local rectangular volume around a point. Use when exact block layout matters.", objectProperties(
                 property("player", "string", "Player name; empty means current player.", false),
@@ -1344,7 +1581,7 @@ public final class AiAgentService {
         tools.add(function("set_time", "Set Minecraft time.", objectProperties(enumProperty("time", new String[]{"day","night","noon","midnight"}, "Desired time.", true))));
         tools.add(function("set_weather", "Set Minecraft weather.", objectProperties(enumProperty("weather", new String[]{"clear","rain","thunder"}, "Desired weather.", true))));
         tools.add(function("spawn_entity", "Spawn any registered Minecraft or modded entity at coordinates; omitted coordinates use the player.", objectProperties(
-                property("entity", "string", "Entity ID.", true), property("player", "string", "Player name; empty means current player.", false), intPropertyOptional("x", "X."), intPropertyOptional("y", "Y."), intPropertyOptional("z", "Z.")
+                property("entity", "string", "Entity ID.", true), property("player", "string", "Player name; empty means current player.", false), intPropertyOptional("x", "X."), intPropertyOptional("y", "Y."), intPropertyOptional("z", "Z."), intPropertyOptional("count", "1..16 entities in one call.")
         )));
         tools.add(function("list_players", "List online players.", objectProperties()));
         tools.add(function("remember_memory", "Remember a useful durable fact automatically when it will help in future turns: preferences, named locations, coordinates, build styles or other stable facts. Do not store trivial chat.", objectProperties(property("text", "string", "Durable fact to remember.", true))));
@@ -1431,13 +1668,15 @@ public final class AiAgentService {
 
     private static List<JsonObject> buildOpenAiContext(String chatId, String currentMessage, String provider) {
         List<JsonObject> result = new ArrayList<>();
-        result.add(chatMessage("system", INSTRUCTIONS + "\n\nPersistent memory for this chat:\n" + AiAgentMemory.forPrompt(chatId)));
-        int maxMessages = provider.equals("groq") ? 4 : 8;
-        int maxChars = provider.equals("groq") ? 3500 : 9000;
-        for (AiChatHistory.Entry entry : AiChatHistory.getRecentForApi(chatId, maxMessages, maxChars)) result.add(chatMessage(entry.role(), entry.text()));
+        String memory = truncate(AiAgentMemory.forPrompt(chatId), 1200);
+        result.add(chatMessage("system", INSTRUCTIONS + "
+Memory:" + memory));
+        for (AiChatHistory.Entry entry : AiChatHistory.getRecentForApi(chatId, 2, 2400)) {
+            result.add(chatMessage(entry.role(), truncate(entry.text(), 900)));
+        }
         if (!currentMessage.isBlank()) {
             boolean already = result.stream().anyMatch(message -> string(message, "role", "").equals("user") && string(message, "content", "").equals(currentMessage));
-            if (!already) result.add(chatMessage("user", currentMessage));
+            if (!already) result.add(chatMessage("user", truncate(currentMessage, 1200)));
         }
         return result;
     }
@@ -1482,7 +1721,7 @@ public final class AiAgentService {
         payload.addProperty("input", input);
         payload.addProperty("store", false);
         payload.addProperty("system_instruction", "Reply concisely. " + INSTRUCTIONS);
-        if (!noTools) payload.add("tools", geminiToolsArray());
+        if (!noTools) payload.add("tools", geminiToolsArray(selectedTools));
         return requestJson(GEMINI_URI, AiClientConfig.getGeminiApiKey(), payload, "Gemini");
     }
 
