@@ -1471,9 +1471,6 @@ public final class AiAgentService {
         }
         return array;
     }
-        return array;
-    }
-
 
     private static Set<String> selectToolNames(String message) {
         String lower = message == null ? "" : message.toLowerCase(Locale.ROOT).replace('ё', 'е');
@@ -1506,6 +1503,8 @@ public final class AiAgentService {
         if (lower.contains("точк") && containsAny(lower, "возрожд", "респаун", "спавн")) selected.add("set_spawnpoint");
         if (containsAny(lower, "запомн", "помни", "забудь", "памят")) selected.addAll(Set.of("remember_memory", "forget_memory"));
         if (lower.contains("команд") || lower.startsWith("/") || lower.contains("выполни")) selected.add("run_minecraft_command");
+        if (containsAny(lower, "онлайн", "игроки", "кто играет", "кто на сервере", "кто здесь")) selected.add("list_players");
+        if (containsAny(lower, "убей", "убить", "убирай моб", "удали моб", "зомби уб", "скелет уб", "крипер уб")) selected.add("run_minecraft_command");
         if (containsAny(lower, "онлайн", "игроки", "кто играет", "кто на сервере", "кто здесь")) selected.add("list_players");
         if (containsAny(lower, "убей", "убить", "убирай моб", "удали моб", "зомби уб", "скелет уб", "крипер уб")) selected.add("run_minecraft_command");
         if (containsAny(lower, "напиши в чат", "сообщен", "скажи всем")) selected.add("send_chat");
@@ -1671,8 +1670,7 @@ public final class AiAgentService {
     private static List<JsonObject> buildOpenAiContext(String chatId, String currentMessage, String provider) {
         List<JsonObject> result = new ArrayList<>();
         String memory = truncate(AiAgentMemory.forPrompt(chatId), 1200);
-        result.add(chatMessage("system", INSTRUCTIONS + "
-Memory:" + memory));
+        result.add(chatMessage("system", INSTRUCTIONS + "\nMemory:" + memory));
         for (AiChatHistory.Entry entry : AiChatHistory.getRecentForApi(chatId, 2, 2400)) {
             result.add(chatMessage(entry.role(), truncate(entry.text(), 900)));
         }
