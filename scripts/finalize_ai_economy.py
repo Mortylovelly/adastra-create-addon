@@ -24,15 +24,16 @@ s = s.replace('"Find nearby entities with compact positions."', '"Find nearby en
 s = s.replace('"Read compact player position, health, food, mode and dimension."', '"Read compact player state."')
 
 # Repair source damage left by the previous automated transform.
-# The old transform could leave a duplicate fragment after openAiToolsArray().
 s = s.replace('        return array;\n    }\n        return array;\n    }\n\n\n    private static Set<String> selectToolNames',
                 '        return array;\n    }\n\n    private static Set<String> selectToolNames',
                 1)
-
-# The generated Java source must contain an escaped newline inside the string literal,
-# not a physical newline that breaks the Java string.
 s = s.replace('result.add(chatMessage("system", INSTRUCTIONS + "\nMemory:" + memory));',
               'result.add(chatMessage("system", INSTRUCTIONS + "\\nMemory:" + memory));',
+              1)
+
+# Fix the Gemini follow-up scope: that method does not receive selectedTools.
+s = s.replace('if (!noTools) payload.add("tools", geminiToolsArray(selectedTools));',
+              'if (!noTools) payload.add("tools", geminiToolsArray());',
               1)
 
 PATH.write_text(s, encoding='utf-8')
