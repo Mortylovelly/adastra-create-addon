@@ -12,7 +12,6 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -25,36 +24,36 @@ jobs:
           java-version: '21'
           distribution: temurin
 
-      - name: Repair AI agent source
-        run: python3 scripts/repair_ai_agent.py
-
-      - name: Clean duplicated diagnostics
-        run: python3 scripts/cleanup_ai_agent.py
-
-      - name: Verify AI agent source
+      - name: Normalize AI source
         shell: bash
         run: |
           set -e
-          ! grep -F 'int result = server.getCommandManager().executeWithPrefix' src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java
-          grep -F 'google/gemma-4-26b-a4b-it:free' src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java
-          grep -F 'openrouter/free' src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java
-          grep -F 'MAX_TOOL_ROUNDS = 4' src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java
-          grep -F 'API_HISTORY_CHARS = 3500' src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java
-
-      - name: Commit repaired source
-        if: github.event_name == 'push'
-        shell: bash
-        run: |
-          set -e
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java')
+          s = p.read_text(encoding='utf-8')
+          s = s.replace('totalRequested += Math.min(volume, Integer.MAX_VALUE);', 'totalRequested += (int) Math.min(volume, (long) Integer.MAX_VALUE);')
+          old = '''String raw = string(function, "arguments", "{}");\n        JsonObject args;\n        try { args = JsonParser.parseString(raw).getAsJsonObject(); }\n        catch (RuntimeException exception) { args = new JsonObject(); }'''
+          new = '''JsonObject args;\n        JsonElement argumentElement = function.get("arguments");\n        try {\n            if (argumentElement != null && argumentElement.isJsonObject()) args = argumentElement.getAsJsonObject().deepCopy();\n            else if (argumentElement != null && argumentElement.isJsonPrimitive()) args = JsonParser.parseString(argumentElement.getAsString()).getAsJsonObject();\n            else args = new JsonObject();\n        } catch (RuntimeException exception) {\n            args = new JsonObject();\n        }'''
+          s = s.replace(old, new)
+          old = 'if (!name.isBlank()) components.add("custom_name=\'" + new com.google.gson.Gson().toJson(new JsonObject()) + "\'");'
+          new = '''if (!name.isBlank()) {\n            JsonObject nameObject = new JsonObject();\n            nameObject.addProperty("text", name);\n            components.add("custom_name='" + new com.google.gson.Gson().toJson(nameObject) + "'");\n        }'''
+          s = s.replace(old, new)
+          old = 'return lower.endsWith("?") && (lower.contains("можешь") || lower.contains("сможешь") || lower.contains("умеешь") || lower.contains("можно ли") || lower.contains("способен") || lower.contains("умеет ли"));'
+          new = '''return (lower.endsWith("?") && (lower.contains("можешь") || lower.contains("сможешь") || lower.contains("умеешь") || lower.contains("можно ли") || lower.contains("способен") || lower.contains("умеет ли")))\n                || lower.startsWith("можешь ли") || lower.startsWith("сможешь ли") || lower.startsWith("умеешь ли");'''
+          s = s.replace(old, new)
+          p.write_text(s, encoding='utf-8')
+          PY
+          git diff --check
           if git diff --quiet -- src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java; then
-            echo 'AI source already repaired.'
-            exit 0
+            echo 'No source normalization needed.'
+          else
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java
+            git commit -m 'Normalize AI agent source [skip ci]'
+            git push origin HEAD:main
           fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java
-          git commit -m 'Repair AI agent behavior [skip ci]'
-          git push origin HEAD:main
 
       - name: Grant Gradle permission
         run: chmod +x gradlew

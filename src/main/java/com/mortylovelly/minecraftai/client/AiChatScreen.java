@@ -16,14 +16,19 @@ public final class AiChatScreen extends Screen {
     private TextFieldWidget messageInput;
     private TextFieldWidget apiKeyInput;
     private ButtonWidget sendButton;
+    private ButtonWidget stopButton;
+    private ButtonWidget geminiButton;
     private ButtonWidget deepSeekButton;
     private ButtonWidget groqButton;
     private ButtonWidget openRouterButton;
     private ButtonWidget testButton;
+    private ButtonWidget newChatButton;
     private ButtonWidget clearChatButton;
     private boolean waiting;
     private String liveStatus = "";
     private long statusAnimationTick;
+    private long knownHistorySize = -1;
+    private String chatId;
     private int panelLeft;
     private int panelTop;
     private int panelWidth;
@@ -33,7 +38,10 @@ public final class AiChatScreen extends Screen {
         super(Text.literal("Minecraft AI Agent"));
         AiChatHistory.load();
         AiAgentMemory.load();
+        chatId = AiChatHistory.getCurrentChatId();
+        AiAgentMemory.migrateLegacyToChat(chatId);
         rebuildVisibleHistory();
+        syncTaskState();
     }
 
     @Override
@@ -41,80 +49,76 @@ public final class AiChatScreen extends Screen {
         AiClientConfig.load();
         AiChatHistory.load();
         AiAgentMemory.load();
+        chatId = AiChatHistory.getCurrentChatId();
         rebuildVisibleHistory();
+
         AiAgentStatus.setListener(status -> {
             MinecraftClient client = MinecraftClient.getInstance();
             client.execute(() -> liveStatus = status == null ? "" : status);
         });
 
-        panelWidth = Math.min(700, width - 32);
-        panelHeight = Math.min(420, height - 32);
+        panelWidth = Math.min(760, width - 24);
+        panelHeight = Math.min(500, height - 24);
         panelLeft = (width - panelWidth) / 2;
         panelTop = (height - panelHeight) / 2;
 
         int keyY = panelTop + 31;
-        apiKeyInput = new TextFieldWidget(
-                textRenderer, panelLeft + 14, keyY,
-                panelWidth - 138, 20, Text.literal("API key")
-        );
-        apiKeyInput.setMaxLength(300);
+        apiKeyInput = new TextFieldWidget(textRenderer, panelLeft + 14, keyY, panelWidth - 140, 20, Text.literal("API key"));
+        apiKeyInput.setMaxLength(500);
         apiKeyInput.setText(AiClientConfig.getApiKey());
-        apiKeyInput.setPlaceholder(Text.literal("API key выбранного провайдера — сохраняется локально"));
+        apiKeyInput.setPlaceholder(Text.literal("API key выбранного провайдера — хранится локально"));
         addDrawableChild(apiKeyInput);
+        addDrawableChild(ButtonWidget.builder(Text.literal("Сохранить"), button -> saveApiKey())
+                .dimensions(panelLeft + panelWidth - 112, keyY, 98, 20).build());
 
-        addDrawableChild(ButtonWidget.builder(
-                        Text.literal("Сохранить") , button -> saveApiKey())
-                .dimensions(panelLeft + panelWidth - 112, keyY, 98, 20)
-                .build());
+        int providerY = panelTop + 58;
+        geminiButton = addDrawableChild(ButtonWidget.builder(Text.literal("Gemini"), button -> selectProvider("gemini"))
+                .dimensions(panelLeft + 14, providerY, 98, 20).build());
+        deepSeekButton = addDrawableChild(ButtonWidget.builder(Text.literal("DeepSeek"), button -> selectProvider("deepseek"))
+                .dimensions(panelLeft + 118, providerY, 98, 20).build());
+        groqButton = addDrawableChild(ButtonWidget.builder(Text.literal("Groq"), button -> selectProvider("groq"))
+                .dimensions(panelLeft + 222, providerY, 98, 20).build());
+        openRouterButton = addDrawableChild(ButtonWidget.builder(Text.literal("OpenRouter"), button -> selectProvider("openrouter"))
+                .dimensions(panelLeft + 326, providerY, 112, 20).build());
 
-        int providerY = panelTop + 57;
-        deepSeekButton = addDrawableChild(ButtonWidget.builder(
-                        Text.literal("DeepSeek"), button -> selectProvider("deepseek"))
-                .dimensions(panelLeft + 14, providerY, 100, 20)
-                .build());
+        testButton = addDrawableChild(ButtonWidget.builder(Text.literal("Проверить"), button -> testConnection())
+                .dimensions(panelLeft + panelWidth - 322, panelTop + 9, 96, 20).build());
+        newChatButton = addDrawableChild(ButtonWidget.builder(Text.literal("Новый чат"), button -> newChat())
+                .dimensions(panelLeft + panelWidth - 218, panelTop + 9, 96, 20).build());
+        clearChatButton = addDrawableChild(ButtonWidget.builder(Text.literal("Очистить"), button -> clearChat())
+                .dimensions(panelLeft + panelWidth - 114, panelTop + 9, 100, 20).build());
 
-        groqButton = addDrawableChild(ButtonWidget.builder(
-                        Text.literal("Groq"), button -> selectProvider("groq"))
-                .dimensions(panelLeft + 120, providerY, 100, 20)
-                .build());
-
-        openRouterButton = addDrawableChild(ButtonWidget.builder(
-                        Text.literal("OpenRouter"), button -> selectProvider("openrouter"))
-                .dimensions(panelLeft + 226, providerY, 112, 20)
-                .build());
-
-        refreshProviderButtons();
-
-        testButton = addDrawableChild(ButtonWidget.builder(
-                        Text.literal("Проверить"), button -> testConnection())
-                .dimensions(panelLeft + panelWidth - 214, panelTop + 9, 98, 20)
-                .build());
-
-        clearChatButton = addDrawableChild(ButtonWidget.builder(
-                        Text.literal("Очистить"), button -> clearChat())
-                .dimensions(panelLeft + panelWidth - 108, panelTop + 9, 94, 20)
-                .build());
-
-        int inputY = panelTop + panelHeight - 34;
-        messageInput = new TextFieldWidget(textRenderer, panelLeft + 14, inputY,
-                panelWidth - 112, 22, Text.literal("Сообщение"));
-        messageInput.setMaxLength(4000);
-        messageInput.setPlaceholder(Text.literal("Напиши, что сделать в Minecraft..."));
+        int inputY = panelTop + panelHeight - 35;
+        messageInput = new TextFieldWidget(textRenderer, panelLeft + 14, inputY, panelWidth - 206, 22, Text.literal("Сообщение"));
+        messageInput.setMaxLength(16000);
+        messageInput.setPlaceholder(Text.literal("Опиши задачу как угодно подробно..."));
         addDrawableChild(messageInput);
 
-        sendButton = addDrawableChild(ButtonWidget.builder(
-                        Text.literal("Отправить"), button -> sendMessage())
-                .dimensions(panelLeft + panelWidth - 92, inputY, 78, 22)
-                .build());
+        sendButton = addDrawableChild(ButtonWidget.builder(Text.literal("Отправить"), button -> sendMessage())
+                .dimensions(panelLeft + panelWidth - 184, inputY, 80, 22).build());
+        stopButton = addDrawableChild(ButtonWidget.builder(Text.literal("Стоп"), button -> AiAgentService.cancelCurrentTask())
+                .dimensions(panelLeft + panelWidth - 94, inputY, 80, 22).build());
 
+        syncTaskState();
         setInitialFocus(messageInput);
+    }
+
+    @Override
+    public void tick() {
+        super.tick();
+        syncTaskState();
+        long size = AiChatHistory.getAll(chatId).size();
+        if (size != knownHistorySize) {
+            knownHistorySize = size;
+            rebuildVisibleHistory();
+        }
     }
 
     private void rebuildVisibleHistory() {
         messages.clear();
-        List<AiChatHistory.Entry> history = AiChatHistory.getAll();
+        List<AiChatHistory.Entry> history = AiChatHistory.getAll(chatId);
         if (history.isEmpty()) {
-            messages.add("AI: Я готов. Напиши, что сделать в мире.");
+            messages.add("AI: Готов. Я могу работать с миром, предметами, мобами, постройками и командами.");
             return;
         }
         for (AiChatHistory.Entry entry : history) {
@@ -122,8 +126,21 @@ public final class AiChatScreen extends Screen {
         }
     }
 
+    private void syncTaskState() {
+        waiting = AiAgentService.isBusy() && chatId.equals(AiAgentService.getActiveChatId());
+        if (stopButton != null) stopButton.active = waiting;
+        if (sendButton != null) sendButton.active = !AiAgentService.isBusy();
+        if (testButton != null) testButton.active = !AiAgentService.isBusy();
+        if (newChatButton != null) newChatButton.active = !AiAgentService.isBusy();
+        if (clearChatButton != null) clearChatButton.active = !AiAgentService.isBusy();
+        if (geminiButton != null) geminiButton.active = !AiAgentService.isBusy() && !AiClientConfig.getProvider().equals("gemini");
+        if (deepSeekButton != null) deepSeekButton.active = !AiAgentService.isBusy() && !AiClientConfig.getProvider().equals("deepseek");
+        if (groqButton != null) groqButton.active = !AiAgentService.isBusy() && !AiClientConfig.getProvider().equals("groq");
+        if (openRouterButton != null) openRouterButton.active = !AiAgentService.isBusy() && !AiClientConfig.getProvider().equals("openrouter");
+    }
+
     private void selectProvider(String provider) {
-        if (waiting) return;
+        if (AiAgentService.isBusy()) return;
         saveApiKeySilently();
         AiClientConfig.setProvider(provider);
         apiKeyInput.setText(AiClientConfig.getApiKey());
@@ -132,16 +149,11 @@ public final class AiChatScreen extends Screen {
     }
 
     private void refreshProviderButtons() {
-        String provider = AiClientConfig.getProvider();
-        if (deepSeekButton != null) deepSeekButton.active = !provider.equals("deepseek");
-        if (groqButton != null) groqButton.active = !provider.equals("groq");
-        if (openRouterButton != null) openRouterButton.active = !provider.equals("openrouter");
+        syncTaskState();
     }
 
     private void saveApiKeySilently() {
-        if (apiKeyInput != null) {
-            AiClientConfig.setApiKey(apiKeyInput.getText());
-        }
+        if (apiKeyInput != null) AiClientConfig.setApiKey(apiKeyInput.getText());
     }
 
     private void saveApiKey() {
@@ -151,110 +163,75 @@ public final class AiChatScreen extends Screen {
                 : "AI: API key очищен.");
     }
 
-    private void clearChat() {
-        if (waiting) return;
-        AiChatHistory.clear();
+    private void newChat() {
+        if (AiAgentService.isBusy()) return;
+        chatId = AiChatHistory.createChat();
+        AiAgentMemory.load();
+        liveStatus = "";
         rebuildVisibleHistory();
-        messages.add("AI: История чата очищена. Память не затронута.");
+        knownHistorySize = AiChatHistory.getAll(chatId).size();
+    }
+
+    private void clearChat() {
+        if (AiAgentService.isBusy()) return;
+        AiChatHistory.clear(chatId);
+        rebuildVisibleHistory();
+        messages.add("AI: История этого чата очищена. Память этого чата сохранена.");
     }
 
     private void testConnection() {
-        if (waiting) return;
+        if (AiAgentService.isBusy()) return;
         saveApiKeySilently();
         if (!AiClientConfig.hasApiKey()) {
-            messages.add("AI: Сначала вставь API key выбранного провайдера и нажми «Сохранить».");
+            messages.add("AI: Сначала вставь API key выбранного провайдера.");
             return;
         }
-
-        waiting = true;
-        liveStatus = "Подключаюсь к " + providerDisplayName() + "...";
-        statusAnimationTick = 0;
-        if (testButton != null) testButton.active = false;
-        if (clearChatButton != null) clearChatButton.active = false;
-        if (sendButton != null) sendButton.active = false;
-        String provider = providerDisplayName();
-        messages.add("AI: Проверяю подключение к " + provider + "...");
-        AiAgentService.testConnection().handle((ok, throwable) -> {
-            MinecraftClient client = MinecraftClient.getInstance();
-            client.execute(() -> {
-                waiting = false;
+        liveStatus = "Проверяю подключение...";
+        messages.add("AI: Проверяю подключение к " + providerDisplayName() + "...");
+        syncTaskState();
+        AiAgentService.testConnection().whenComplete((ok, throwable) -> {
+            MinecraftClient.getInstance().execute(() -> {
                 liveStatus = "";
-                if (testButton != null) testButton.active = true;
-                if (clearChatButton != null) clearChatButton.active = true;
-                if (sendButton != null) sendButton.active = true;
                 if (throwable != null) {
                     Throwable cause = deepestCause(throwable);
                     messages.add("AI: Ошибка: " + (cause.getMessage() == null ? cause.toString() : cause.getMessage()));
                 } else {
-                    messages.add(ok
-                            ? "AI: " + provider + " подключён и отвечает."
-                            : "AI: " + provider + " не вернул ожидаемый ответ.");
+                    messages.add(ok ? "AI: Подключение успешно." : "AI: Провайдер не вернул ожидаемый ответ.");
                 }
             });
-            return null;
         });
     }
 
     private void sendMessage() {
-        if (waiting || messageInput == null) return;
-
+        if (AiAgentService.isBusy() || messageInput == null) return;
         saveApiKeySilently();
         String message = messageInput.getText().trim();
         if (message.isEmpty()) return;
-
         if (!AiClientConfig.hasApiKey()) {
-            messages.add("AI: Сначала вставь " + providerDisplayName() + " API key сверху и нажми «Сохранить».");
+            messages.add("AI: Сначала вставь " + providerDisplayName() + " API key сверху.");
             return;
         }
 
         messages.add("Ты: " + message);
-        AiChatHistory.add("user", message);
         messageInput.setText("");
-        waiting = true;
         liveStatus = "Анализирую запрос...";
         statusAnimationTick = 0;
-        sendButton.active = false;
-        if (testButton != null) testButton.active = false;
-        if (clearChatButton != null) clearChatButton.active = false;
+        syncTaskState();
 
-        CompletableFuture<String> future = AiAgentService.chat(message);
-        future.handle((reply, throwable) -> {
-            MinecraftClient client = MinecraftClient.getInstance();
-            client.execute(() -> {
-                waiting = false;
-                liveStatus = "";
-                if (sendButton != null) sendButton.active = true;
-                if (testButton != null) testButton.active = true;
-                if (clearChatButton != null) clearChatButton.active = true;
-
-                if (throwable != null) {
-                    Throwable cause = deepestCause(throwable);
-                    String error = cause.getMessage() == null ? cause.toString() : cause.getMessage();
-                    messages.add("AI: Ошибка: " + error);
-                    AiChatHistory.add("assistant", "Ошибка: " + error);
-                } else {
-                    String finalReply = reply == null || reply.isBlank()
-                            ? "Я не получил текстового ответа."
-                            : reply;
-                    messages.add("AI: " + finalReply);
-                    AiChatHistory.add("assistant", finalReply);
-                }
-            });
-            return null;
-        });
+        CompletableFuture<String> future = AiAgentService.chat(chatId, message);
+        future.whenComplete((reply, throwable) -> MinecraftClient.getInstance().execute(this::syncTaskState));
     }
 
     private static Throwable deepestCause(Throwable throwable) {
         Throwable current = throwable;
         int depth = 0;
-        while (current.getCause() != null && current.getCause() != current && depth++ < 16) {
-            current = current.getCause();
-        }
+        while (current.getCause() != null && current.getCause() != current && depth++ < 16) current = current.getCause();
         return current;
     }
 
     private String providerDisplayName() {
         return switch (AiClientConfig.getProvider()) {
+            case "gemini" -> "Gemini";
             case "groq" -> "Groq";
             case "openrouter" -> "OpenRouter";
             default -> "DeepSeek";
@@ -269,27 +246,20 @@ public final class AiChatScreen extends Screen {
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
         renderBackground(context, mouseX, mouseY, delta);
-
         context.fill(panelLeft, panelTop, panelLeft + panelWidth, panelTop + panelHeight, 0xF0121216);
         context.fill(panelLeft, panelTop, panelLeft + panelWidth, panelTop + 1, 0xFFFFFFFF);
-        context.fill(panelLeft, panelTop + 82, panelLeft + panelWidth, panelTop + 83, 0xFF303038);
+        context.fill(panelLeft, panelTop + 84, panelLeft + panelWidth, panelTop + 85, 0xFF303038);
 
         context.drawTextWithShadow(textRenderer, title, panelLeft + 14, panelTop + 10, 0xFFFFFF);
-        String statusText = waiting
-                ? buildAnimatedStatus()
-                : providerDisplayName() + " AI Agent";
-        int statusColor = waiting ? 0xA0FFA0 : 0xB0B0B8;
-        context.drawTextWithShadow(textRenderer, statusText, panelLeft + 14, panelTop + 92, statusColor);
-        context.drawTextWithShadow(textRenderer,
-                "Провайдер:", panelLeft + 352, panelTop + 62, 0xC0C0C8);
-        context.drawTextWithShadow(textRenderer,
-                "Память: " + AiAgentMemory.count(), panelLeft + panelWidth - 120, panelTop + 92, 0xB0B0B8);
+        String statusText = waiting ? buildAnimatedStatus() : providerDisplayName() + " AI Agent";
+        context.drawTextWithShadow(textRenderer, statusText, panelLeft + 14, panelTop + 96, waiting ? 0xA0FFA0 : 0xB0B0B8);
+        context.drawTextWithShadow(textRenderer, "Чат: " + chatId.substring(0, Math.min(8, chatId.length())), panelLeft + 190, panelTop + 96, 0x77777F);
+        context.drawTextWithShadow(textRenderer, "Память: " + AiAgentMemory.count(chatId), panelLeft + panelWidth - 110, panelTop + 96, 0xB0B0B8);
 
-        int chatTop = panelTop + 112;
-        int chatBottom = panelTop + panelHeight - 46;
+        int chatTop = panelTop + 116;
+        int chatBottom = panelTop + panelHeight - 49;
         int maxWidth = panelWidth - 28;
         int y = chatBottom;
-
         outer:
         for (int i = messages.size() - 1; i >= 0; i--) {
             String[] lines = wrap(messages.get(i), maxWidth);
@@ -300,15 +270,12 @@ public final class AiChatScreen extends Screen {
             }
             y -= 7;
         }
-
         super.render(context, mouseX, mouseY, delta);
     }
 
     private String buildAnimatedStatus() {
         statusAnimationTick++;
-        String base = liveStatus == null || liveStatus.isBlank()
-                ? "ИИ работает..."
-                : liveStatus;
+        String base = liveStatus == null || liveStatus.isBlank() ? "ИИ работает..." : liveStatus;
         String[] dots = {"", ".", "..", "..."};
         return "● " + base + dots[(int) ((statusAnimationTick / 8) % dots.length)];
     }
@@ -316,16 +283,12 @@ public final class AiChatScreen extends Screen {
     private String[] wrap(String text, int maxWidth) {
         List<String> result = new ArrayList<>();
         StringBuilder current = new StringBuilder();
-
         for (String word : text.split(" ")) {
             String candidate = current.isEmpty() ? word : current + " " + word;
-            if (textRenderer.getWidth(candidate) <= maxWidth) {
-                current.setLength(0);
-                current.append(candidate);
-            } else {
+            if (textRenderer.getWidth(candidate) <= maxWidth) current = new StringBuilder(candidate);
+            else {
                 if (!current.isEmpty()) result.add(current.toString());
-                current.setLength(0);
-                current.append(word);
+                current = new StringBuilder(word);
             }
         }
         if (!current.isEmpty()) result.add(current.toString());
