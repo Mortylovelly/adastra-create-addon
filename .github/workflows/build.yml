@@ -27,6 +27,9 @@ jobs:
       - name: Complete AI service source
         run: python3 scripts/complete_ai_service.py
 
+      - name: Finalize AI economy source
+        run: python3 scripts/finalize_ai_economy.py
+
       - name: Commit normalized source
         if: github.event_name == 'push'
         shell: bash
