@@ -800,7 +800,7 @@ public final class AiAgentService {
                     int y2 = requiredInt(op, "y2");
                     int z2 = requiredInt(op, "z2");
                     long volume = volume(x1, y1, z1, x2, y2, z2);
-                    totalRequested += Math.min(volume, Integer.MAX_VALUE);
+                    totalRequested += (int) Math.min(volume, (long) Integer.MAX_VALUE);
                     if (volume > MAX_BUILD_VOLUME) return errorResult("Одна операция слишком большая.");
                     Block block = type.equals("clear") ? net.minecraft.block.Blocks.AIR : blockFromId(string(op, "block", ""));
                     String mode = type.equals("hollow") ? "hollow" : "fill";
@@ -938,7 +938,11 @@ public final class AiAgentService {
         }
         if (args.has("unbreakable") && args.get("unbreakable").getAsBoolean()) components.add("unbreakable={}");
         String name = string(args, "custom_name", "").trim();
-        if (!name.isBlank()) components.add("custom_name='" + new com.google.gson.Gson().toJson(new JsonObject()) + "'");
+        if (!name.isBlank()) {
+            JsonObject nameObject = new JsonObject();
+            nameObject.addProperty("text", name);
+            components.add("custom_name='" + new com.google.gson.Gson().toJson(nameObject) + "'");
+        }
         if (!components.isEmpty()) stack.append("[").append(String.join(",", components)).append("]");
         String command = "give " + player.getName().getString() + " " + stack + " " + count;
         JsonObject result = runCommand(server, command);
@@ -1240,10 +1244,15 @@ public final class AiAgentService {
 
     private static JsonObject callArguments(JsonObject call) {
         JsonObject function = call.has("function") && call.get("function").isJsonObject() ? call.getAsJsonObject("function") : call;
-        String raw = string(function, "arguments", "{}");
         JsonObject args;
-        try { args = JsonParser.parseString(raw).getAsJsonObject(); }
-        catch (RuntimeException exception) { args = new JsonObject(); }
+        JsonElement argumentElement = function.get("arguments");
+        try {
+            if (argumentElement != null && argumentElement.isJsonObject()) args = argumentElement.getAsJsonObject().deepCopy();
+            else if (argumentElement != null && argumentElement.isJsonPrimitive()) args = JsonParser.parseString(argumentElement.getAsString()).getAsJsonObject();
+            else args = new JsonObject();
+        } catch (RuntimeException exception) {
+            args = new JsonObject();
+        }
         // Memory is always scoped to the chat that owns the task.
         String chatId = getActiveChatId();
         if (!chatId.isBlank() && (string(function, "name", "").equals("remember_memory") || string(function, "name", "").equals("forget_memory"))) args.addProperty("_chat_id", chatId);
@@ -1434,7 +1443,8 @@ public final class AiAgentService {
 
     private static boolean isCapabilityQuestion(String message) {
         String lower = message.toLowerCase(Locale.ROOT).trim();
-        return lower.endsWith("?") && (lower.contains("можешь") || lower.contains("сможешь") || lower.contains("умеешь") || lower.contains("можно ли") || lower.contains("способен") || lower.contains("умеет ли"));
+        return (lower.endsWith("?") && (lower.contains("можешь") || lower.contains("сможешь") || lower.contains("умеешь") || lower.contains("можно ли") || lower.contains("способен") || lower.contains("умеет ли")))
+                || lower.startsWith("можешь ли") || lower.startsWith("сможешь ли") || lower.startsWith("умеешь ли");
     }
 
     private static String geminiOutputText(JsonObject response) {
