@@ -1506,10 +1506,12 @@ public final class AiAgentService {
         if (lower.contains("точк") && containsAny(lower, "возрожд", "респаун", "спавн")) selected.add("set_spawnpoint");
         if (containsAny(lower, "запомн", "помни", "забудь", "памят")) selected.addAll(Set.of("remember_memory", "forget_memory"));
         if (lower.contains("команд") || lower.startsWith("/") || lower.contains("выполни")) selected.add("run_minecraft_command");
+        if (containsAny(lower, "онлайн", "игроки", "кто играет", "кто на сервере", "кто здесь")) selected.add("list_players");
+        if (containsAny(lower, "убей", "убить", "убирай моб", "удали моб", "зомби уб", "скелет уб", "крипер уб")) selected.add("run_minecraft_command");
         if (containsAny(lower, "напиши в чат", "сообщен", "скажи всем")) selected.add("send_chat");
 
         if (selected.isEmpty()) {
-            selected.addAll(Set.of("get_player_state", "observe_world", "run_minecraft_command", "give_item", "teleport_player", "set_gamemode", "set_time", "set_weather"));
+            selected.addAll(Set.of("get_player_state", "list_players", "observe_world", "run_minecraft_command", "give_item", "teleport_player", "set_gamemode", "set_time", "set_weather"));
         }
         return selected;
     }
@@ -1523,11 +1525,11 @@ public final class AiAgentService {
 
     private static List<JsonObject> createTools() {
         List<JsonObject> tools = new ArrayList<>();
-        tools.add(function("get_player_state", "Read compact player position, health, food, mode and dimension.", objectProperties(property("player", "string", "Player name.", false))));
+        tools.add(function("get_player_state", "Read compact player state.", objectProperties(property("player", "string", "Player name.", false))));
         tools.add(function("get_block", "Read one exact block ID at coordinates.", objectProperties(property("player", "string", "Player name.", false), intProperty("x"), intProperty("y"), intProperty("z"))));
         tools.add(function("set_block", "Set one exact block at coordinates.", objectProperties(property("player", "string", "Player name.", false), intProperty("x"), intProperty("y"), intProperty("z"), property("block", "string", "Block ID.", true))));
         tools.add(function("fill_area", "Fill, hollow or clear one cuboid up to the safe build cap.", objectProperties(property("player", "string", "Player name.", false), intProperty("x1"), intProperty("y1"), intProperty("z1"), intProperty("x2"), intProperty("y2"), intProperty("z2"), enumProperty("mode", new String[]{"fill","hollow","clear"}, "Operation mode.", true), property("block", "string", "Block ID; omitted for clear.", false))));
-        tools.add(function("find_entities", "Find nearby entities with compact positions.", objectProperties(property("player", "string", "Player name.", false), property("type", "string", "Optional entity ID filter.", false), intPropertyOptional("radius", "Search radius up to 32."), intPropertyOptional("limit", "Result limit up to 30."))));
+        tools.add(function("find_entities", "Find nearby entities compactly.", objectProperties(property("player", "string", "Player name.", false), property("type", "string", "Optional entity ID filter.", false), intPropertyOptional("radius", "Search radius up to 32."), intPropertyOptional("limit", "Result limit up to 30."))));
         tools.add(function("give_experience", "Give experience levels or points.", objectProperties(property("player", "string", "Player name.", false), intProperty("amount"), enumProperty("unit", new String[]{"levels","points"}, "Experience unit.", true))));
         tools.add(function("set_spawnpoint", "Set the player's respawn point; omitted coordinates use the current position.", objectProperties(property("player", "string", "Player name.", false), intPropertyOptional("x", "Spawn X."), intPropertyOptional("y", "Spawn Y."), intPropertyOptional("z", "Spawn Z."))));
         tools.add(function("observe_world", "Observe the current player, exact position/rotation, time/weather, nearby blocks, surface heightmap and nearby entities/mobs. Use before spatial work.", objectProperties(
