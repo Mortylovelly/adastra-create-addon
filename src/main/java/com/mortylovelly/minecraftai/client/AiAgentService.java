@@ -47,6 +47,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 public final class AiAgentService {
     private static final URI DEEPSEEK_URI = URI.create("https://api.deepseek.com/responses");
+    private static final URI DEEPSEEK_CHAT_URI = URI.create("https://api.deepseek.com/chat/completions");
     private static final URI GROQ_URI = URI.create("https://api.groq.com/openai/v1/chat/completions");
     private static final URI OPENROUTER_URI = URI.create("https://openrouter.ai/api/v1/chat/completions");
     private static final URI GEMINI_URI = URI.create("https://generativelanguage.googleapis.com/v1beta/interactions");
@@ -142,20 +143,7 @@ public final class AiAgentService {
         try {
             work = switch (AiClientConfig.getProvider()) {
                 case "gemini" -> chatGemini(task, message);
-                case "deepseek" -> {
-                    JsonObject payload = new JsonObject();
-                    payload.addProperty("model", DEEPSEEK_MODEL);
-                    payload.addProperty("instructions", INSTRUCTIONS + "\n\nPersistent memory for this chat:\n" + AiAgentMemory.forPrompt(task.chatId));
-                    payload.addProperty("input", message);
-                    payload.addProperty("max_output_tokens", 4096);
-                    yield requestJson(DEEPSEEK_URI, AiClientConfig.getDeepSeekApiKey(), payload, "DeepSeek")
-                            .thenApply(response -> {
-                                if (task.cancelled) return "Запрос остановлен пользователем.";
-                                String text = string(response, "output_text", "");
-                                AiAgentStatus.clear();
-                                return text.isBlank() ? "DeepSeek не вернул текстовый ответ." : text;
-                            });
-                }
+                case "deepseek" -> chatOpenAiCompatible(task, message, "deepseek");
                 default -> chatOpenAiCompatible(task, message, AiClientConfig.getProvider());
             };
         } catch (Exception exception) {
@@ -213,11 +201,17 @@ public final class AiAgentService {
         if (provider.equals("deepseek")) {
             JsonObject payload = new JsonObject();
             payload.addProperty("model", DEEPSEEK_MODEL);
-            payload.addProperty("instructions", "Reply with exactly: OK");
-            payload.addProperty("input", "Connection test");
-            payload.addProperty("max_output_tokens", 32);
-            return requestJson(DEEPSEEK_URI, AiClientConfig.getDeepSeekApiKey(), payload, "DeepSeek")
-                    .thenApply(root -> !string(root, "output_text", "").isBlank());
+            JsonArray messages = new JsonArray();
+            messages.add(chatMessage("system", "Reply with exactly: OK"));
+            messages.add(chatMessage("user", "Connection test"));
+            payload.add("messages", messages);
+            payload.addProperty("temperature", 0);
+            payload.addProperty("max_tokens", 32);
+            return requestJson(DEEPSEEK_CHAT_URI, AiClientConfig.getDeepSeekApiKey(), payload, "DeepSeek")
+                    .thenApply(root -> {
+                        JsonObject choice = firstChoice(root);
+                        return choice != null && choice.has("message") && !string(choice.getAsJsonObject("message"), "content", "").isBlank();
+                    });
         }
         JsonObject payload = new JsonObject();
         payload.addProperty("model", modelForProvider(provider));
@@ -1534,9 +1528,27 @@ public final class AiAgentService {
         return text.contains("API 400") || text.contains("API 404") || text.contains("previous_interaction");
     }
 
-    private static URI uriForProvider(String provider) { return provider.equals("openrouter") ? OPENROUTER_URI : GROQ_URI; }
-    private static String keyForProvider(String provider) { return provider.equals("openrouter") ? AiClientConfig.getOpenRouterApiKey() : AiClientConfig.getGroqApiKey(); }
-    private static String modelForProvider(String provider) { return provider.equals("openrouter") ? OPENROUTER_MODEL : GROQ_MODEL; }
+    private static URI uriForProvider(String provider) {
+        return switch (provider) {
+            case "deepseek" -> DEEPSEEK_CHAT_URI;
+            case "openrouter" -> OPENROUTER_URI;
+            default -> GROQ_URI;
+        };
+    }
+    private static String keyForProvider(String provider) {
+        return switch (provider) {
+            case "deepseek" -> AiClientConfig.getDeepSeekApiKey();
+            case "openrouter" -> AiClientConfig.getOpenRouterApiKey();
+            default -> AiClientConfig.getGroqApiKey();
+        };
+    }
+    private static String modelForProvider(String provider) {
+        return switch (provider) {
+            case "deepseek" -> DEEPSEEK_MODEL;
+            case "openrouter" -> OPENROUTER_MODEL;
+            default -> GROQ_MODEL;
+        };
+    }
     private static String providerName(String provider) { return switch (provider) { case "gemini" -> "Gemini"; case "groq" -> "Groq"; case "openrouter" -> "OpenRouter"; default -> "DeepSeek"; }; }
     private static JsonObject chatMessage(String role, String content) { JsonObject object = new JsonObject(); object.addProperty("role", role); object.addProperty("content", content); return object; }
     private static JsonObject firstChoice(JsonObject root) { if (!root.has("choices") || !root.get("choices").isJsonArray() || root.getAsJsonArray("choices").isEmpty()) return null; return root.getAsJsonArray("choices").get(0).getAsJsonObject(); }
