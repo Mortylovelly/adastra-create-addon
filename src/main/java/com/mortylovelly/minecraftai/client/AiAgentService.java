@@ -142,7 +142,20 @@ public final class AiAgentService {
         try {
             work = switch (AiClientConfig.getProvider()) {
                 case "gemini" -> chatGemini(task, message);
-                case "deepseek" -> chatDeepSeek(task, message);
+                case "deepseek" -> {
+                    JsonObject payload = new JsonObject();
+                    payload.addProperty("model", DEEPSEEK_MODEL);
+                    payload.addProperty("instructions", INSTRUCTIONS + "\n\nPersistent memory for this chat:\n" + AiAgentMemory.forPrompt(task.chatId));
+                    payload.addProperty("input", message);
+                    payload.addProperty("max_output_tokens", 4096);
+                    yield requestJson(DEEPSEEK_URI, AiClientConfig.getDeepSeekApiKey(), payload, "DeepSeek")
+                            .thenApply(response -> {
+                                if (task.cancelled) return "Запрос остановлен пользователем.";
+                                String text = string(response, "output_text", "");
+                                AiAgentStatus.clear();
+                                return text.isBlank() ? "DeepSeek не вернул текстовый ответ." : text;
+                            });
+                }
                 default -> chatOpenAiCompatible(task, message, AiClientConfig.getProvider());
             };
         } catch (Exception exception) {
@@ -297,7 +310,7 @@ public final class AiAgentService {
                     for (JsonObject call : calls) {
                         if (task.cancelled) return CompletableFuture.completedFuture("Запрос остановлен пользователем.");
                         String name = string(call, "name", "unknown");
-                        AiAgentStatus.set(statusForTool(name));
+                        AiAgentStatus.set("Выполняю действие");
                         futures.add(executeToolWithCache(task, name, callArguments(call), new HashMap<>()));
                     }
                     return sequence(futures).thenCompose(results -> {
@@ -438,7 +451,7 @@ public final class AiAgentService {
                         JsonObject call = element.getAsJsonObject();
                         validCalls.add(call);
                         String name = toolName(call);
-                        AiAgentStatus.set(statusForTool(name));
+                        AiAgentStatus.set("Выполняю действие");
                         results.add(executeOpenAiToolAsync(task, call, cache));
                     }
                     return sequence(results).thenCompose(toolResults -> {
