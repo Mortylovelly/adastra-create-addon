@@ -23,5 +23,17 @@ s = s.replace(
 s = s.replace('"Find nearby entities with compact positions."', '"Find nearby entities compactly."')
 s = s.replace('"Read compact player position, health, food, mode and dimension."', '"Read compact player state."')
 
+# Repair source damage left by the previous automated transform.
+# The old transform could leave a duplicate fragment after openAiToolsArray().
+s = s.replace('        return array;\n    }\n        return array;\n    }\n\n\n    private static Set<String> selectToolNames',
+                '        return array;\n    }\n\n    private static Set<String> selectToolNames',
+                1)
+
+# The generated Java source must contain an escaped newline inside the string literal,
+# not a physical newline that breaks the Java string.
+s = s.replace('result.add(chatMessage("system", INSTRUCTIONS + "\nMemory:" + memory));',
+              'result.add(chatMessage("system", INSTRUCTIONS + "\\nMemory:" + memory));',
+              1)
+
 PATH.write_text(s, encoding='utf-8')
-print('AI routing tightened for player lists and entity removal requests')
+print('AI routing tightened and source normalization repaired')
