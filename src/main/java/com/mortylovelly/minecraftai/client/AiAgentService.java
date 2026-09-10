@@ -48,7 +48,6 @@ import java.util.concurrent.atomic.AtomicReference;
 public final class AiAgentService {
     private static final URI DEEPSEEK_URI = URI.create("https://api.deepseek.com/responses");
     private static final URI DEEPSEEK_CHAT_URI = URI.create("https://api.deepseek.com/chat/completions");
-    private static final URI DEEPSEEK_CHAT_URI = URI.create("https://api.deepseek.com/chat/completions");
     private static final URI GROQ_URI = URI.create("https://api.groq.com/openai/v1/chat/completions");
     private static final URI OPENROUTER_URI = URI.create("https://openrouter.ai/api/v1/chat/completions");
     private static final URI GEMINI_URI = URI.create("https://generativelanguage.googleapis.com/v1beta/interactions");
