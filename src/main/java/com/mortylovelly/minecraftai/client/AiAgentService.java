@@ -1507,6 +1507,8 @@ public final class AiAgentService {
         if (containsAny(lower, "убей", "убить", "убирай моб", "удали моб", "зомби уб", "скелет уб", "крипер уб")) selected.add("run_minecraft_command");
         if (containsAny(lower, "онлайн", "игроки", "кто играет", "кто на сервере", "кто здесь")) selected.add("list_players");
         if (containsAny(lower, "убей", "убить", "убирай моб", "удали моб", "зомби уб", "скелет уб", "крипер уб")) selected.add("run_minecraft_command");
+        if (containsAny(lower, "онлайн", "игроки", "кто играет", "кто на сервере", "кто здесь")) selected.add("list_players");
+        if (containsAny(lower, "убей", "убить", "убирай моб", "удали моб", "зомби уб", "скелет уб", "крипер уб")) selected.add("run_minecraft_command");
         if (containsAny(lower, "напиши в чат", "сообщен", "скажи всем")) selected.add("send_chat");
 
         if (selected.isEmpty()) {
@@ -1721,7 +1723,7 @@ public final class AiAgentService {
         payload.addProperty("input", input);
         payload.addProperty("store", false);
         payload.addProperty("system_instruction", "Reply concisely. " + INSTRUCTIONS);
-        if (!noTools) payload.add("tools", geminiToolsArray(selectedTools));
+        if (!noTools) payload.add("tools", geminiToolsArray());
         return requestJson(GEMINI_URI, AiClientConfig.getGeminiApiKey(), payload, "Gemini");
     }
 
