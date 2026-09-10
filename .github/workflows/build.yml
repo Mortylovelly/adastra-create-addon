@@ -24,7 +24,7 @@ jobs:
           java-version: '21'
           distribution: temurin
 
-      - name: Normalize AI source
+      - name: Complete AI service source
         shell: bash
         run: |
           set -e
@@ -32,26 +32,81 @@ jobs:
           from pathlib import Path
           p = Path('src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java')
           s = p.read_text(encoding='utf-8')
+
+          anchor = '    private static JsonArray geminiToolsArray() {'
+          additions = r'''
+    private static CompletableFuture<String> chatDeepSeek(ActiveTask task, String message) {
+        if (task.cancelled) return CompletableFuture.completedFuture("Запрос остановлен пользователем.");
+        AiAgentStatus.set("Отправляю запрос DeepSeek");
+        JsonObject payload = new JsonObject();
+        payload.addProperty("model", DEEPSEEK_MODEL);
+        payload.addProperty("instructions", INSTRUCTIONS + "\\n\\nPersistent memory for this chat:\\n" + AiAgentMemory.forPrompt(task.chatId));
+        payload.addProperty("input", message);
+        payload.addProperty("max_output_tokens", 4096);
+        return requestJson(DEEPSEEK_URI, AiClientConfig.getDeepSeekApiKey(), payload, "DeepSeek")
+                .thenApply(response -> {
+                    if (task.cancelled) return "Запрос остановлен пользователем.";
+                    String text = string(response, "output_text", "");
+                    AiAgentStatus.clear();
+                    return text.isBlank() ? "DeepSeek не вернул текстовый ответ." : text;
+                });
+    }
+
+    private static String statusForTool(String name) {
+        return switch (name) {
+            case "observe_world" -> "Осматриваю мир";
+            case "inspect_region" -> "Проверяю блоки";
+            case "locate_structure" -> "Ищу структуру";
+            case "build_house", "build_blueprint" -> "Строю";
+            case "clear_area" -> "Очищаю область";
+            case "break_block" -> "Ломаю блок";
+            case "give_item" -> "Выдаю предмет";
+            case "apply_effect" -> "Применяю эффект";
+            case "set_player_stats" -> "Изменяю характеристики";
+            case "clear_inventory" -> "Очищаю инвентарь";
+            case "teleport_player" -> "Телепортирую игрока";
+            case "set_gamemode" -> "Меняю режим игры";
+            case "set_time" -> "Меняю время";
+            case "set_weather" -> "Меняю погоду";
+            case "spawn_entity" -> "Создаю существо";
+            case "get_inventory" -> "Проверяю инвентарь";
+            case "list_players" -> "Проверяю игроков";
+            case "remember_memory" -> "Запоминаю";
+            case "forget_memory" -> "Забываю";
+            case "run_minecraft_command" -> "Выполняю команду";
+            case "send_chat" -> "Отправляю сообщение";
+            default -> "Выполняю действие";
+        };
+    }
+
+'''
+          if 'private static CompletableFuture<String> chatDeepSeek(ActiveTask task, String message)' not in s:
+              if anchor not in s: raise SystemExit('Anchor for AI service completion not found')
+              s = s.replace(anchor, additions + anchor, 1)
+
           s = s.replace('totalRequested += Math.min(volume, Integer.MAX_VALUE);', 'totalRequested += (int) Math.min(volume, (long) Integer.MAX_VALUE);')
           old = '''String raw = string(function, "arguments", "{}");\n        JsonObject args;\n        try { args = JsonParser.parseString(raw).getAsJsonObject(); }\n        catch (RuntimeException exception) { args = new JsonObject(); }'''
           new = '''JsonObject args;\n        JsonElement argumentElement = function.get("arguments");\n        try {\n            if (argumentElement != null && argumentElement.isJsonObject()) args = argumentElement.getAsJsonObject().deepCopy();\n            else if (argumentElement != null && argumentElement.isJsonPrimitive()) args = JsonParser.parseString(argumentElement.getAsString()).getAsJsonObject();\n            else args = new JsonObject();\n        } catch (RuntimeException exception) {\n            args = new JsonObject();\n        }'''
           s = s.replace(old, new)
+
           old = 'if (!name.isBlank()) components.add("custom_name=\'" + new com.google.gson.Gson().toJson(new JsonObject()) + "\'");'
           new = '''if (!name.isBlank()) {\n            JsonObject nameObject = new JsonObject();\n            nameObject.addProperty("text", name);\n            components.add("custom_name='" + new com.google.gson.Gson().toJson(nameObject) + "'");\n        }'''
           s = s.replace(old, new)
+
           old = 'return lower.endsWith("?") && (lower.contains("можешь") || lower.contains("сможешь") || lower.contains("умеешь") || lower.contains("можно ли") || lower.contains("способен") || lower.contains("умеет ли"));'
           new = '''return (lower.endsWith("?") && (lower.contains("можешь") || lower.contains("сможешь") || lower.contains("умеешь") || lower.contains("можно ли") || lower.contains("способен") || lower.contains("умеет ли")))\n                || lower.startsWith("можешь ли") || lower.startsWith("сможешь ли") || lower.startsWith("умеешь ли");'''
           s = s.replace(old, new)
+
           p.write_text(s, encoding='utf-8')
           PY
           git diff --check
           if git diff --quiet -- src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java; then
-            echo 'No source normalization needed.'
+            echo 'AI service already complete.'
           else
             git config user.name 'github-actions[bot]'
             git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
             git add src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java
-            git commit -m 'Normalize AI agent source [skip ci]'
+            git commit -m 'Complete AI service source [skip ci]'
             git push origin HEAD:main
           fi
 
