@@ -4,11 +4,13 @@ PATH = Path('src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.ja
 s = PATH.read_text(encoding='utf-8')
 
 # DeepSeek must use the same OpenAI-compatible agent loop as Groq/OpenRouter.
-s = s.replace(
-    'private static final URI DEEPSEEK_URI = URI.create("https://api.deepseek.com/responses");',
-    '''private static final URI DEEPSEEK_URI = URI.create("https://api.deepseek.com/responses");
-    private static final URI DEEPSEEK_CHAT_URI = URI.create("https://api.deepseek.com/chat/completions");'''
-)
+chat_uri_line = '    private static final URI DEEPSEEK_CHAT_URI = URI.create("https://api.deepseek.com/chat/completions");'
+s = s.replace(chat_uri_line + '\n' + chat_uri_line, chat_uri_line)
+if chat_uri_line not in s:
+    s = s.replace(
+        '    private static final URI DEEPSEEK_URI = URI.create("https://api.deepseek.com/responses");',
+        '    private static final URI DEEPSEEK_URI = URI.create("https://api.deepseek.com/responses");\n' + chat_uri_line
+    )
 
 old_deepseek = '''case "deepseek" -> {
                     JsonObject payload = new JsonObject();
@@ -24,12 +26,8 @@ old_deepseek = '''case "deepseek" -> {
                                 return text.isBlank() ? "DeepSeek не вернул текстовый ответ." : text;
                             });
                 }'''
-new_deepseek = 'case "deepseek" -> chatOpenAiCompatible(task, message, "deepseek");'
-if old_deepseek in s:
-    s = s.replace(old_deepseek, new_deepseek)
-else:
-    # Also repair an already-unified source without changing it again.
-    s = s.replace('case "deepseek" -> chatOpenAiCompatible(task, message, "deepseek");', new_deepseek)
+s = s.replace(old_deepseek, 'case "deepseek" -> chatOpenAiCompatible(task, message, "deepseek");')
+s = s.replace('case "deepseek" -> chatOpenAiCompatible(task, message, "deepseek");', 'case "deepseek" -> chatOpenAiCompatible(task, message, "deepseek");')
 
 # Keep the connection test, but make it use the same Chat Completions protocol.
 old_test = '''if (provider.equals("deepseek")) {
@@ -56,8 +54,7 @@ new_test = '''if (provider.equals("deepseek")) {
                         return choice != null && choice.has("message") && !string(choice.getAsJsonObject("message"), "content", "").isBlank();
                     });
         }'''
-if old_test in s:
-    s = s.replace(old_test, new_test)
+s = s.replace(old_test, new_test)
 
 # Make the provider routing shared with the common OpenAI-compatible loop.
 s = s.replace(
