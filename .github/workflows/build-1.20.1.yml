@@ -35,3 +35,5 @@ jobs:
         with:
           name: minecraft-ai-agent-1.20.1
           path: build/libs/*.jar
+
+# CI validation branch marker
