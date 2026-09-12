@@ -238,7 +238,6 @@ public final class AiChatScreen extends Screen {
         };
     }
 
-    @Override
     public void renderBackground(DrawContext context, int mouseX, int mouseY, float delta) {
         context.fill(0, 0, width, height, 0x66000000);
     }
