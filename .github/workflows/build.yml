@@ -2,9 +2,9 @@ name: Build Minecraft AI Agent
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, minecraft-1.20.1-fabric ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, minecraft-1.20.1-fabric ]
 
 permissions:
   contents: write
@@ -18,10 +18,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up JDK 21
+      - name: Set up JDK
         uses: actions/setup-java@v5
         with:
-          java-version: '21'
+          java-version: '17'
           distribution: temurin
 
       - name: Apply AI economy optimization
@@ -43,7 +43,7 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add src/main/java/com/mortylovelly/minecraftai/client/AiAgentService.java
           git commit -m 'Optimize AI token economy [skip ci]'
-          git push origin HEAD:main
+          git push origin HEAD:${GITHUB_REF_NAME}
 
       - name: Grant Gradle permission
         run: chmod +x gradlew
